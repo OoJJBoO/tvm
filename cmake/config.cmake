@@ -371,6 +371,8 @@ set(USE_CCACHE AUTO)
 # - /path/to/folder/containing/: Path to folder containing papi.pc.
 set(USE_PAPI OFF)
 
+set(USE_LIKWID ON)
+
 # Whether to use GoogleTest for C++ unit tests. When enabled, the generated
 # build file (e.g. Makefile) will have a target "cpptest".
 # Possible values:
