@@ -133,7 +133,7 @@ set(USE_MICRO_STANDALONE_RUNTIME OFF)
 # - OFF: disable llvm, note this will disable CPU codegen
 #        which is needed for most cases
 # - /path/to/llvm-config: enable specific LLVM when multiple llvm-dev is available.
-set(USE_LLVM OFF)
+set(USE_LLVM ON)
 
 #---------------------------------------------
 # Contrib libraries
@@ -372,6 +372,8 @@ set(USE_CCACHE AUTO)
 set(USE_PAPI OFF)
 
 set(USE_LIKWID ON)
+
+set(USE_RPC_PROFILING ON)
 
 # Whether to use GoogleTest for C++ unit tests. When enabled, the generated
 # build file (e.g. Makefile) will have a target "cpptest".
