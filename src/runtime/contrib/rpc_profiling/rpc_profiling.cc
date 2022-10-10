@@ -14,37 +14,23 @@ namespace tvm {
 namespace runtime {
 namespace rpc_profiling {
 
-PackedFunc RPCProfiler::profile(std::vector<std::string> collector_names) {
-    std::vector<profiling::MetricCollector> collectors{};
-    for (const auto collector_name : collector_names) {
-        if (collector_name == "likwid") {
-            // collectors.push_back(profiling::CreateLikwidMetricCollector({}));
-        }
-    }
-    return TypedPackedFunc<std::string(std::string)>(
-        [collectors, this](String arg_name) {
-            auto prof = profiling::Profiler(devs_, collectors, {{String("Executor"), String("VM")}});
-            auto invoke = vm_->GetFunction("invoke", vm_);
-            // warmup
-            for (int i{}; i < 3; ++i) {
-                invoke(arg_name);
-            }
-            prof.Start();
-            invoke(arg_name);
-            prof.Stop();
-            auto report = prof.Report();
-            return report->AsJSON();
-        }
-    );
+/*! \brief Execute a profiling run of the given function using the provided vm.
+*/
+std::string rpc_likwid_profile_func(runtime::Module vm_mod, std::string func_name) {
+    LOG(INFO) << "[Likwid Profiling] Received profiling request for function " << func_name;
+    auto profile_func = vm_mod.GetFunction("profile");
+    Array<profiling::MetricCollector> collectors({
+        profiling::CreateLikwidMetricCollector(Array<profiling::DeviceWrapper>())
+    });
+    LOG(INFO) << "[Likwid Profiling] Beginning profiling...";
+    profiling::Report report = profile_func(func_name, collectors);
+    LOG(INFO) << "[Likwid Profiling] Done. Sending serialized report.";
+    return std::string(report->AsJSON().c_str());
 }
 
-TVM_REGISTER_GLOBAL("runtime._RPCProfiler").set_body([](TVMArgs args, TVMRetValue* rv) {
-    runtime::Module mod = args[0];
-    LOG(INFO) << "runtime._RPCProfiler called with type_key " << mod.operator->()->type_key();
-    auto* exec = dynamic_cast<tvm::runtime::vm::Executable*>(mod.operator->());
-    RPCProfiler prof(GetObjectPtr<tvm::runtime::vm::Executable>(exec), {});
-    *rv = prof.profile({});
-});
+TVM_REGISTER_GLOBAL("runtime.rpc_likwid_profile_func").set_body_typed(
+    rpc_likwid_profile_func
+);
 
 } // namespace rpc_profiling
 } // namespace runtime

@@ -9,6 +9,12 @@ namespace tvm {
 namespace runtime {
 namespace profiling {
 
+/*! \brief Construct a metric collector that uses the likwid-perfctr API to 
+ * collect hardware counter data.
+ *
+ * \note Please make sure to run TVM through the likwid-perfctr wrapper 
+ * application following the instructions given in the Likwid documentation!
+ */
 TVM_DLL MetricCollector CreateLikwidMetricCollector(Array<DeviceWrapper> devices);
 
 } // namespace profiling

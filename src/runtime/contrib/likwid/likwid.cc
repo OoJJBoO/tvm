@@ -70,7 +70,7 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
         _read_event_counts(&nevents, events, &time, &count);
         std::vector<double> end_values(events, events + nevents * sizeof(double));
         std::unordered_map<String, ObjectRef> reported_metrics;
-        for (size_t i{}; i < nevents; ++i) {
+        for (int i{}; i < nevents; ++i) {
             if (end_values[i] < event_set_node->start_values[i]) {
                 LOG(WARNING) << "Detected overflow while reading performance counter, setting value to -1";
                 reported_metrics[String(std::to_string(i))] = 
@@ -110,7 +110,6 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
     TVM_DECLARE_FINAL_OBJECT_INFO(LikwidMetricCollectorNode, MetricCollectorNode);
 };
 
-
 class LikwidMetricCollector : public MetricCollector {
 public:
     explicit LikwidMetricCollector(Array<DeviceWrapper> devices) {
@@ -120,6 +119,9 @@ public:
                                           LikwidMetricCollectorNode);
 };
 
+MetricCollector CreateLikwidMetricCollector(Array<DeviceWrapper> devices) {
+    return LikwidMetricCollector(devices);
+}
 
 TVM_REGISTER_OBJECT_TYPE(LikwidEventSetNode);
 TVM_REGISTER_OBJECT_TYPE(LikwidMetricCollectorNode);

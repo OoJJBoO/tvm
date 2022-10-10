@@ -13,20 +13,7 @@ namespace tvm {
 namespace runtime {
 namespace rpc_profiling {
 
-class RPCProfiler {
-public:
-    RPCProfiler(const ObjectPtr<tvm::runtime::vm::Executable>& exec, std::vector<Device> devices)
-    : devs_(devices) {
-        vm_ = make_object<tvm::runtime::vm::VirtualMachine>();
-        vm_->LoadExecutable(exec);
-    }
-
-    PackedFunc profile(std::vector<std::string> collector_names);
-
-private:
-    ObjectPtr<tvm::runtime::vm::VirtualMachine> vm_;
-    std::vector<Device> devs_;
-};
+std::string rpc_likwid_profile_func(runtime::Module vm_mod, std::string func_name);
 
 } // namespace rpc_profiling
 } // namespace runtime
