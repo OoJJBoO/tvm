@@ -16,6 +16,7 @@
 # under the License.
 """Registration of profiling objects in python."""
 
+from modulefinder import Module
 from typing import Dict, Sequence, Optional
 from ... import _ffi
 from . import _ffi_api
@@ -298,7 +299,52 @@ if _ffi.get_global_func("runtime.profiling.LikwidMetricCollector", allow_missing
     
     @_ffi.register_object("runtime.profiling.LikwidMetricCollector")
     class LikwidMetricCollector(MetricCollector):
+        """Collects performance counter metrics using the likwid-perfctr API.
+        
+        Please make sure to run TVM through the likwid-perfctr wrapper 
+        application following the instructions given in the Likwid 
+        documentation!
+        """
 
         def __init__(self, devices: Optional[Sequence[Device]] = None):
             wrapped_devices = [DeviceWrapper(dev) for dev in devices]
             self.__init_handle_by_constructor__(_ffi_api.LikwidMetricCollector, wrapped_devices)
+
+    # Import VirtualMachineProfiler to enable typing for convenience method
+    from tvm.runtime.profiler_vm import VirtualMachineProfiler
+
+
+    def rpc_likwid_profile_func(*args, runtime_mod: Module, vm: VirtualMachineProfiler, func_name: str = "main", **kwargs) -> Report:
+        """Convenience function to profile a given function over RPC using 
+        Likwid performance metrics. 
+        
+        Start a call to the profile function of the given vm profiler (that 
+        can be remote!) and report results.
+
+        Parameters
+        ----------
+        runtime_mod : Module
+            The (remote) runtime module to get global functions from. Normally 
+            this will be the one returned by rpc.connect().
+        vm : VirtualMachineProfiler
+            The vm profiler to use. 
+            Please make sure the vm is initialized and the module to profile is
+            loaded before calling this function.
+            function.
+        func_name : str
+            The name of the function that should be profiled.
+        args : list[tvm.runtime.NDArray] or list[np.ndarray]
+            Arguments that are passed to the profiled function.
+        kwargs: dict of str to tvm.runtime.NDArray or np.ndarray
+            Named arguments that are passed to the profiled function.
+            
+        Returns
+        -------
+        report : Report
+            The collected performance metrics.
+        """
+        if args or kwargs:
+            vm.set_input(func_name, *args, **kwargs)
+        profile_func = runtime_mod.get_function("runtime.rpc_likwid_profile_func")
+        report_json = profile_func(vm.module, func_name)
+        return Report.from_json(report_json)

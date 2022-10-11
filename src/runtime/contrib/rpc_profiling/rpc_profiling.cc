@@ -17,14 +17,14 @@ namespace rpc_profiling {
 /*! \brief Execute a profiling run of the given function using the provided vm.
 */
 std::string rpc_likwid_profile_func(runtime::Module vm_mod, std::string func_name) {
-    LOG(INFO) << "[Likwid Profiling] Received profiling request for function " << func_name;
+    LOG(INFO) << "Received profiling request for function " << func_name;
     auto profile_func = vm_mod.GetFunction("profile");
     Array<profiling::MetricCollector> collectors({
         profiling::CreateLikwidMetricCollector(Array<profiling::DeviceWrapper>())
     });
-    LOG(INFO) << "[Likwid Profiling] Beginning profiling...";
+    LOG(INFO) << "Beginning profiling...";
     profiling::Report report = profile_func(func_name, collectors);
-    LOG(INFO) << "[Likwid Profiling] Done. Sending serialized report.";
+    LOG(INFO) << "Done. Sending serialized report.";
     return std::string(report->AsJSON().c_str());
 }
 
