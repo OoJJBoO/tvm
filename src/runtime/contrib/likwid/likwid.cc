@@ -22,21 +22,92 @@ namespace runtime {
 namespace profiling {
 namespace likwid {
 
+// ------------------------------------------------------------------------------------------------
+// Some constants
+// ------------------------------------------------------------------------------------------------
+
 constexpr const char* REGION_NAME = "LikwidMetricCollector";
 constexpr const char* OVERFLOW_WARNING = "Detected overflow while reading performance counter, setting value to -1";
 
+// ------------------------------------------------------------------------------------------------
+// Convenience functions with error printing
+// ------------------------------------------------------------------------------------------------
+
+/*! \brief Register default marker region and print errors. */
+inline void _marker_register_region() {
+    int status = likwid_markerRegisterRegion(REGION_NAME);
+    if (status != 0) {
+        LOG(ERROR) << "Could not register region! Status: " << status;
+    }
+}
+
+/*! \brief Start default marker region and print errors. */
+inline void _marker_start_region() {
+    int status = likwid_markerStartRegion(REGION_NAME);
+    if (status != 0) {
+        LOG(ERROR) << "Could not start marker region! Status: " << status;
+    }
+}
+
+/*! \brief Stop default marker region and print errors. */
+inline void _marker_stop_region() {
+    int status = likwid_markerStopRegion(REGION_NAME);
+    if (status != 0) {
+        LOG(ERROR) << "Could not stop marker region! Status: " << status;
+    }
+}
+
+/*! \brief Get results of the given marker region and print errors.
+ *
+ * \param region_tag [in] The tag of the region to read.
+ * \param nevents [in/out] The size of the `events` array. Will be set to 
+ * the number of available metrics on return.
+ * \param events [in/out] Array containing the collected event counts.
+ * \param time [out] The elapsed time since the region was started.
+ * \param count [out] The call count of the marker region.
+*/
+inline void _marker_get_region(const char* region_tag, int* nevents, double* events, double* time, int* count) {
+    likwid_markerGetRegion(region_tag, nevents, events, time, count);
+    if (nevents == 0) {
+        LOG(WARNING) << "Event count is zero!";
+    }
+}
+
+/*! \brief Read the current event set's counters.
+ *
+ * \param nevents [in/out] The size of the `events` array. Will be set to 
+ * the number of available metrics on return.
+ * \param events [in/out] Array containing the collected event counts.
+ * \param time [out] The elapsed time since the region was started.
+ * \param count [out] The call count of the marker region.
+*/
+inline void _marker_read_event_counts(int* nevents, double* events, double* time, int* count) {
+    _marker_stop_region();
+    _marker_get_region(REGION_NAME, nevents, events, time, count);
+    _marker_start_region();
+}
+
+// ------------------------------------------------------------------------------------------------
+// Likwid MetricCollector
+// ------------------------------------------------------------------------------------------------
+
 /*! \brief Object holding start values of collected metrics. */
 struct LikwidEventSetNode : public Object {
-
     std::vector<double> start_values;
     Device dev;
 
+    /*! \brief Construct a new event set node.
+     *
+     * \param start_values The event values at the time of creating this node.
+     * \param dev The device this node is created for.
+    */
     explicit LikwidEventSetNode(std::vector<double> start_values, Device dev) 
         : start_values(start_values), dev(dev) {}
 
     static constexpr const char* _type_key = "LikwidEventSetNode";
     TVM_DECLARE_FINAL_OBJECT_INFO(LikwidEventSetNode, Object);
 };
+
 
 /*! \brief MetricCollectorNode for metrics collected using likwid-perfctr API.
  *
@@ -59,8 +130,8 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
     */
     void Init(Array<DeviceWrapper> devices) override {
         likwid_markerInit();
-        likwid_markerRegisterRegion(REGION_NAME);
-        likwid_markerStartRegion(REGION_NAME);
+        _marker_register_region();
+        _marker_start_region();
     }
 
     /*! \brief Start marker region and begin collecting data.
@@ -75,7 +146,7 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
         double events[20];
         double time;
         int count;
-        _read_event_counts(&nevents, events, &time, &count);
+        _marker_read_event_counts(&nevents, events, &time, &count);
         std::vector<double> start_values(events, events + nevents * sizeof(double));
         return ObjectRef(make_object<LikwidEventSetNode>(start_values, device));
     }
@@ -92,7 +163,7 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
         double events[20];
         double time;
         int count;
-        _read_event_counts(&nevents, events, &time, &count);
+        _marker_read_event_counts(&nevents, events, &time, &count);
         std::vector<double> end_values(events, events + nevents * sizeof(double));
         int groupId = perfmon_getIdOfActiveGroup();
         std::unordered_map<String, ObjectRef> reported_metrics;
@@ -112,34 +183,8 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
     /*! \brief Close marker region and remove connection to likwid-perfctr API.
     */
     ~LikwidMetricCollectorNode() final {
-        int res = likwid_markerStopRegion(REGION_NAME);
-        if (res < 0) {
-            LOG(ERROR) << "Could not stop marker region! Error code: " << res;
-        }
+        _marker_stop_region();
         likwid_markerClose();
-    }
-
-    /*! \brief Read the current event set's counters.
-     *
-     * \param nevents [in/out] The size of the `events` array. Will be set to 
-     * the number of available metrics on return.
-     * \param events [in/out] Array containing the collected event counts.
-     * \param time [out] The elapsed time since the region was started.
-     * \param count [out] The call count of the marker region.
-    */
-    void _read_event_counts(int* nevents, double* events, double* time, int* count) {
-        int status = likwid_markerStopRegion(REGION_NAME);
-        if (status < 0) {
-            LOG(ERROR) << "Could not stop marker region! Error code: " << status;
-        }
-        likwid_markerGetRegion(REGION_NAME, nevents, events, time, count);
-        if (nevents == 0) {
-            LOG(WARNING) << "Event count is zero!";
-        }
-        status = likwid_markerStartRegion(REGION_NAME);
-        if (status < 0) {
-            LOG(ERROR) << "Could not start marker region! Error code: " << status;
-        }
     }
 
     static constexpr const char* _type_key = "runtime.profiling.LikwidMetricCollector";
@@ -157,21 +202,40 @@ public:
 };
 
 
+/*! \brief Construct a metric collector that uses the likwid-perfctr API to 
+ * collect hardware counter data.
+ *
+ * \note Please make sure to run TVM through the likwid-perfctr wrapper 
+ * application following the instructions given in the Likwid documentation!
+ * 
+ * \param devices Not used at the moment.
+ */
 MetricCollector CreateLikwidMetricCollector(Array<DeviceWrapper> devices) {
     return LikwidMetricCollector(devices);
 }
 
-
 TVM_REGISTER_OBJECT_TYPE(LikwidEventSetNode);
 TVM_REGISTER_OBJECT_TYPE(LikwidMetricCollectorNode);
-
 
 TVM_REGISTER_GLOBAL("runtime.profiling.LikwidMetricCollector")
     .set_body_typed([](Array<DeviceWrapper> devices) {
         return LikwidMetricCollector(devices);
     });
 
+TVM_REGISTER_GLOBAL("runtime.rpc_likwid_profile_func").set_body_typed(
+    rpc_likwid_profile_func
+);
 
+// ------------------------------------------------------------------------------------------------
+// RPC Profiling
+// ------------------------------------------------------------------------------------------------
+
+/*! \brief Execute a profiling run of the given function using the provided vm. 
+ *
+ * \param vm_mod The `Module` containing the profiler vm to profile on.
+ * \param func_name The name of the function to profile.
+ * \returns The serialized `Report` of the profiling run.
+*/
 std::string rpc_likwid_profile_func(runtime::Module vm_mod, std::string func_name) {
     LOG(INFO) << "Received profiling request for function " << func_name;
     auto profile_func = vm_mod.GetFunction("profile");
@@ -183,10 +247,6 @@ std::string rpc_likwid_profile_func(runtime::Module vm_mod, std::string func_nam
     LOG(INFO) << "Done. Sending serialized report.";
     return std::string(report->AsJSON().c_str());
 }
-
-TVM_REGISTER_GLOBAL("runtime.rpc_likwid_profile_func").set_body_typed(
-    rpc_likwid_profile_func
-);
 
 } // namespace likwid
 } // namespace profiling
