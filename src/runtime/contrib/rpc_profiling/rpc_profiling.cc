@@ -20,7 +20,7 @@ std::string rpc_likwid_profile_func(runtime::Module vm_mod, std::string func_nam
     LOG(INFO) << "Received profiling request for function " << func_name;
     auto profile_func = vm_mod.GetFunction("profile");
     Array<profiling::MetricCollector> collectors({
-        profiling::CreateLikwidMetricCollector(Array<profiling::DeviceWrapper>())
+        profiling::likwid::CreateLikwidMetricCollector(Array<profiling::DeviceWrapper>())
     });
     LOG(INFO) << "Beginning profiling...";
     profiling::Report report = profile_func(func_name, collectors);

@@ -20,10 +20,10 @@
 namespace tvm {
 namespace runtime {
 namespace profiling {
-
+namespace likwid {
 
 constexpr const char* REGION_NAME = "LikwidMetricCollector";
-
+constexpr const char* OVERFLOW_WARNING = "Detected overflow while reading performance counter, setting value to -1";
 
 /*! \brief Object holding start values of collected metrics. */
 struct LikwidEventSetNode : public Object {
@@ -93,15 +93,16 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
         int count;
         _read_event_counts(&nevents, events, &time, &count);
         std::vector<double> end_values(events, events + nevents * sizeof(double));
+        int groupId = perfmon_getIdOfActiveGroup();
         std::unordered_map<String, ObjectRef> reported_metrics;
-        for (int i{}; i < nevents; ++i) {
-            if (end_values[i] < event_set_node->start_values[i]) {
-                LOG(WARNING) << "Detected overflow while reading performance counter, setting value to -1";
-                reported_metrics[String(std::to_string(i))] = 
-                    ObjectRef(make_object<CountNode>(-1));
+        for (int eventId{}; eventId < nevents; ++eventId) {
+            double diff = end_values[eventId] - event_set_node->start_values[eventId];
+            String eventName = String(perfmon_getEventName(groupId, eventId));
+            if (diff < 0) {
+                LOG(WARNING) << OVERFLOW_WARNING;
+                reported_metrics[eventName] = ObjectRef(make_object<CountNode>(-1));
             } else {
-                reported_metrics[String(std::to_string(i))] = 
-                    ObjectRef(make_object<CountNode>(end_values[i] - event_set_node->start_values[i]));
+                reported_metrics[eventName] = ObjectRef(make_object<CountNode>(diff));
             }
         }
         return reported_metrics;
@@ -166,6 +167,10 @@ TVM_REGISTER_GLOBAL("runtime.profiling.LikwidMetricCollector")
         return LikwidMetricCollector(devices);
     });
 
+#undef LIKWID_REGION_NAME
+#undef LIKWID_OVERFLOW_WARNING
+
+} // namespace likwid
 } // namespace profiling
 } // namespace runtime
 } // namespace tvm
