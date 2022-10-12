@@ -236,14 +236,14 @@ TVM_REGISTER_GLOBAL("runtime.rpc_likwid_profile_func").set_body_typed(
  * \param func_name The name of the function to profile.
  * \returns The serialized `Report` of the profiling run.
 */
-std::string rpc_likwid_profile_func(runtime::Module vm_mod, std::string func_name) {
+std::string rpc_likwid_profile_func(Module vm_mod, std::string func_name) {
     LOG(INFO) << "Received profiling request for function " << func_name;
     auto profile_func = vm_mod.GetFunction("profile");
-    Array<profiling::MetricCollector> collectors({
-        profiling::likwid::CreateLikwidMetricCollector(Array<profiling::DeviceWrapper>())
+    Array<MetricCollector> collectors({
+        CreateLikwidMetricCollector(Array<DeviceWrapper>())
     });
     LOG(INFO) << "Beginning profiling...";
-    profiling::Report report = profile_func(func_name, collectors);
+    Report report = profile_func(func_name, collectors);
     LOG(INFO) << "Done. Sending serialized report.";
     return std::string(report->AsJSON().c_str());
 }

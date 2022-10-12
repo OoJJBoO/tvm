@@ -12,7 +12,7 @@ namespace likwid {
 
 TVM_DLL MetricCollector CreateLikwidMetricCollector(Array<DeviceWrapper> devices);
 
-std::string rpc_likwid_profile_func(runtime::Module vm_mod, std::string func_name);
+std::string rpc_likwid_profile_func(Module vm_mod, std::string func_name);
 
 } // namespace likwid
 } // namespace profiling
