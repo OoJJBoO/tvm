@@ -188,11 +188,6 @@ TVM_REGISTER_GLOBAL("runtime.rpc_likwid_profile_func").set_body_typed(
     rpc_likwid_profile_func
 );
 
-
-#undef LIKWID_REGION_NAME
-#undef LIKWID_OVERFLOW_WARNING
-
-
 } // namespace likwid
 } // namespace profiling
 } // namespace runtime
