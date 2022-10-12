@@ -46,8 +46,11 @@ struct LikwidEventSetNode : public Object {
 */
 struct LikwidMetricCollectorNode final : public MetricCollectorNode {
     
-    /*! \brief Construct a new collector node object. */
-    explicit LikwidMetricCollectorNode() {}
+    /*! \brief Construct a new collector node object.
+     *
+     * \param devices Not used for now. TODO: Add compatibility check!
+    */
+    explicit LikwidMetricCollectorNode(Array<DeviceWrapper> devices) {}
 
     /*! \brief Initialization call. Establish connection to likwid-perfctr API.
      *
