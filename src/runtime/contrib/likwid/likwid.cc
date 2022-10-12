@@ -25,6 +25,7 @@ namespace profiling {
 constexpr const char* REGION_NAME = "LikwidMetricCollector";
 
 
+/*! \brief Object holding start values of collected metrics. */
 struct LikwidEventSetNode : public Object {
 
     std::vector<double> start_values;
@@ -37,19 +38,33 @@ struct LikwidEventSetNode : public Object {
     TVM_DECLARE_FINAL_OBJECT_INFO(LikwidEventSetNode, Object);
 };
 
+/*! \brief MetricCollectorNode for metrics collected using likwid-perfctr API.
+ *
+ * \note Please make sure to run TVM through the likwid-perfctr wrapper 
+ * application following the instructions given in the Likwid documentation 
+ * when using this collector!
+*/
 struct LikwidMetricCollectorNode final : public MetricCollectorNode {
-    explicit LikwidMetricCollectorNode(Array<DeviceWrapper> devices) {
-        // Do nothing for now...
-    }
-
+    
+    /*! \brief Construct a new collector node object. */
     explicit LikwidMetricCollectorNode() {}
 
+    /*! \brief Initialization call. Establish connection to likwid-perfctr API.
+     *
+     * \param devices Not used by this collector at the moment.
+    */
     void Init(Array<DeviceWrapper> devices) override {
         likwid_markerInit();
         likwid_markerRegisterRegion(REGION_NAME);
         likwid_markerStartRegion(REGION_NAME);
     }
 
+    /*! \brief Start marker region and begin collecting data.
+     *
+     * \param device Not used by this collector at the moment.
+     * \returns A `LikwidEventSetNode` containing the values read at the start 
+     * of the call. Used by the next `Stop` call to determine difference.
+    */
     ObjectRef Start(Device device) override {
         likwid_markerThreadInit();
         int nevents = 20;
@@ -61,6 +76,12 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
         return ObjectRef(make_object<LikwidEventSetNode>(start_values, device));
     }
 
+    /*! \brief Stop marker region and end data collection.
+     *
+     * \param object The previously created `LikwidEventSetNode`.
+     * \returns A mapping from the names of the collected metrics to their 
+     * corresponding values.
+    */
     Map<String, ObjectRef> Stop(ObjectRef object) override {
         const LikwidEventSetNode* event_set_node = object.as<LikwidEventSetNode>();
         int nevents = 20;
@@ -83,6 +104,8 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
         return reported_metrics;
     }
 
+    /*! \brief Close marker region and remove connection to likwid-perfctr API.
+    */
     ~LikwidMetricCollectorNode() final {
         int res = likwid_markerStopRegion(REGION_NAME);
         if (res < 0) {
@@ -91,6 +114,14 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
         likwid_markerClose();
     }
 
+    /*! \brief Read the current event set's counters.
+     *
+     * \param nevents [in/out] The size of the `events` array. Will be set to 
+     * the number of available metrics on return.
+     * \param events [in/out] Array containing the collected event counts.
+     * \param time [out] The elapsed time since the region was started.
+     * \param count [out] The call count of the marker region.
+    */
     void _read_event_counts(int* nevents, double* events, double* time, int* count) {
         int status = likwid_markerStopRegion(REGION_NAME);
         if (status < 0) {
@@ -110,6 +141,7 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
     TVM_DECLARE_FINAL_OBJECT_INFO(LikwidMetricCollectorNode, MetricCollectorNode);
 };
 
+/*! Wrapper for `LikwidMetricCollectorNode`. */
 class LikwidMetricCollector : public MetricCollector {
 public:
     explicit LikwidMetricCollector(Array<DeviceWrapper> devices) {
