@@ -377,8 +377,6 @@ set(USE_PAPI OFF)
 
 set(USE_LIKWID ON)
 
-set(USE_RPC_PROFILING ON)
-
 # Whether to use GoogleTest for C++ unit tests. When enabled, the generated
 # build file (e.g. Makefile) will have a target "cpptest".
 # Possible values:

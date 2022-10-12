@@ -15,8 +15,18 @@ namespace likwid {
  *
  * \note Please make sure to run TVM through the likwid-perfctr wrapper 
  * application following the instructions given in the Likwid documentation!
+ * 
+ * \param devices Not used at the moment.
  */
 TVM_DLL MetricCollector CreateLikwidMetricCollector(Array<DeviceWrapper> devices);
+
+/*! \brief Execute a profiling run of the given function using the provided vm. 
+ *
+ * \param vm_mod The `Module` containing the profiler vm to profile on.
+ * \param func_name The name of the function to profile.
+ * \returns The serialized `Report` of the profiling run.
+*/
+std::string rpc_likwid_profile_func(runtime::Module vm_mod, std::string func_name);
 
 } // namespace likwid
 } // namespace profiling

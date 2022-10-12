@@ -48,7 +48,8 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
     
     /*! \brief Construct a new collector node object.
      *
-     * \param devices Not used for now. TODO: Add compatibility check!
+     * \param devices Not used for now. 
+     * \todo Add compatibility check!
     */
     explicit LikwidMetricCollectorNode(Array<DeviceWrapper> devices) {}
 
@@ -155,20 +156,42 @@ public:
                                           LikwidMetricCollectorNode);
 };
 
+
 MetricCollector CreateLikwidMetricCollector(Array<DeviceWrapper> devices) {
     return LikwidMetricCollector(devices);
 }
 
+
 TVM_REGISTER_OBJECT_TYPE(LikwidEventSetNode);
 TVM_REGISTER_OBJECT_TYPE(LikwidMetricCollectorNode);
+
 
 TVM_REGISTER_GLOBAL("runtime.profiling.LikwidMetricCollector")
     .set_body_typed([](Array<DeviceWrapper> devices) {
         return LikwidMetricCollector(devices);
     });
 
+
+std::string rpc_likwid_profile_func(runtime::Module vm_mod, std::string func_name) {
+    LOG(INFO) << "Received profiling request for function " << func_name;
+    auto profile_func = vm_mod.GetFunction("profile");
+    Array<profiling::MetricCollector> collectors({
+        profiling::likwid::CreateLikwidMetricCollector(Array<profiling::DeviceWrapper>())
+    });
+    LOG(INFO) << "Beginning profiling...";
+    profiling::Report report = profile_func(func_name, collectors);
+    LOG(INFO) << "Done. Sending serialized report.";
+    return std::string(report->AsJSON().c_str());
+}
+
+TVM_REGISTER_GLOBAL("runtime.rpc_likwid_profile_func").set_body_typed(
+    rpc_likwid_profile_func
+);
+
+
 #undef LIKWID_REGION_NAME
 #undef LIKWID_OVERFLOW_WARNING
+
 
 } // namespace likwid
 } // namespace profiling
