@@ -296,11 +296,11 @@ if _ffi.get_global_func("runtime.profiling.PAPIMetricCollector", allow_missing=T
 
 # We only enable this class when TVM is build with Likwid support
 if _ffi.get_global_func("runtime.profiling.LikwidMetricCollector", allow_missing=True) is not None:
-    
+
     @_ffi.register_object("runtime.profiling.LikwidMetricCollector")
     class LikwidMetricCollector(MetricCollector):
         """Collects performance counter metrics using the likwid-perfctr API.
-        
+
         Please make sure to run TVM through the likwid-perfctr wrapper 
         application following the instructions given in the Likwid 
         documentation!
@@ -313,11 +313,10 @@ if _ffi.get_global_func("runtime.profiling.LikwidMetricCollector", allow_missing
     # Import VirtualMachineProfiler to enable typing for convenience method
     from tvm.runtime.profiler_vm import VirtualMachineProfiler
 
-
-    def rpc_likwid_profile_func(*args, runtime_mod: Module, vm: VirtualMachineProfiler, func_name: str = "main", **kwargs) -> Report:
+    def rpc_likwid_profile_func(runtime_mod: Module, vm: VirtualMachineProfiler, func_name: str = "main", *args, **kwargs) -> Report:
         """Convenience function to profile a given function over RPC using 
         Likwid performance metrics. 
-        
+
         Start a call to the profile function of the given vm profiler (that 
         can be remote!) and report results.
 
@@ -337,7 +336,7 @@ if _ffi.get_global_func("runtime.profiling.LikwidMetricCollector", allow_missing
             Arguments that are passed to the profiled function.
         kwargs: dict of str to tvm.runtime.NDArray or np.ndarray
             Named arguments that are passed to the profiled function.
-            
+
         Returns
         -------
         report : Report
