@@ -76,6 +76,14 @@ inline void _marker_read_event_counts(int* nevents, double* events, double* time
     _marker_start_region();
 }
 
+/*! \brief Read all counters of the given group ID and print errors. */
+inline void _perfmon_read_group(int group_id) {
+    int status = perfmon_readGroupCounters(group_id);
+    if (status < 0) {
+        LOG(WARNING) << "Error while reading group counters! Status: " << status;
+    }
+}
+
 // ------------------------------------------------------------------------------------------------
 // Likwid MetricCollector
 // ------------------------------------------------------------------------------------------------
@@ -189,7 +197,7 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
                 metric_name += std::to_string(thread_id);
                 metric_name += std::string("]");
                 double result = perfmon_getMetric(group_id, metric_id, thread_id);
-                reported_metrics[metric_name] = ObjectRef(make_object<CountNode>(result));
+                reported_metrics[metric_name] = ObjectRef(make_object<RatioNode>(result));
             }
         }
         return reported_metrics;
@@ -213,8 +221,8 @@ public:
 /*! Wrapper for `LikwidMetricCollectorNode`. */
 class LikwidMetricCollector : public MetricCollector {
 public:
-    explicit LikwidMetricCollector(bool doCollectRawEvents) {
-        data_ = make_object<LikwidMetricCollectorNode>(doCollectRawEvents);
+    explicit LikwidMetricCollector(bool do_collect_raw_events) {
+        data_ = make_object<LikwidMetricCollectorNode>(do_collect_raw_events);
     }
     TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(LikwidMetricCollector, MetricCollector, 
                                           LikwidMetricCollectorNode);
