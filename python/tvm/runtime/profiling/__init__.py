@@ -306,14 +306,13 @@ if _ffi.get_global_func("runtime.profiling.LikwidMetricCollector", allow_missing
         documentation!
         """
 
-        def __init__(self, devices: Optional[Sequence[Device]] = None):
-            wrapped_devices = [DeviceWrapper(dev) for dev in devices]
-            self.__init_handle_by_constructor__(_ffi_api.LikwidMetricCollector, wrapped_devices)
+        def __init__(self, do_collect_raw_events: bool = False):
+            self.__init_handle_by_constructor__(_ffi_api.LikwidMetricCollector, do_collect_raw_events)
 
     # Import VirtualMachineProfiler to enable typing for convenience method
     from tvm.runtime.profiler_vm import VirtualMachineProfiler
 
-    def rpc_likwid_profile_func(runtime_mod: Module, vm: VirtualMachineProfiler, func_name: str = "main", *args, **kwargs) -> Report:
+    def rpc_likwid_profile_func(runtime_mod: Module, vm: VirtualMachineProfiler, func_name: str = "main", do_collect_raw_events: bool = False, *args, **kwargs) -> Report:
         """Convenience function to profile a given function over RPC using 
         Likwid performance metrics. 
 
@@ -332,6 +331,9 @@ if _ffi.get_global_func("runtime.profiling.LikwidMetricCollector", allow_missing
             function.
         func_name : str
             The name of the function that should be profiled.
+        do_collect_raw_events : bool
+            If this is true, also collect the raw events used in the set event 
+            group instead of only the derived metrics.
         args : list[tvm.runtime.NDArray] or list[np.ndarray]
             Arguments that are passed to the profiled function.
         kwargs: dict of str to tvm.runtime.NDArray or np.ndarray
@@ -345,5 +347,5 @@ if _ffi.get_global_func("runtime.profiling.LikwidMetricCollector", allow_missing
         if args or kwargs:
             vm.set_input(func_name, *args, **kwargs)
         profile_func = runtime_mod.get_function("runtime.rpc_likwid_profile_func")
-        report_json = profile_func(vm.module, func_name)
+        report_json = profile_func(vm.module, func_name, do_collect_raw_events)
         return Report.from_json(report_json)
