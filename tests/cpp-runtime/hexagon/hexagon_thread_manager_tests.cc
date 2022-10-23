@@ -20,6 +20,7 @@
 #include <gtest/gtest.h>
 #include <tvm/runtime/logging.h>
 
+#include "../src/runtime/hexagon/hexagon_device_api.h"
 #include "../src/runtime/hexagon/hexagon_thread_manager.h"
 
 using namespace tvm::runtime;
@@ -28,6 +29,7 @@ using namespace tvm::runtime::hexagon;
 class HexagonThreadManagerTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    // Create with no hardware resources so we don't conflict with session HexagonThreadManager
     htm = new HexagonThreadManager(threads, stack_size, pipe_size);
     streams = htm->GetStreamHandles();
   }
@@ -53,6 +55,15 @@ TEST_F(HexagonThreadManagerTest, ctor_errors) {
   ASSERT_THROW(HexagonThreadManager(6, stack_size, 9), InternalError);
   // pipe too big
   ASSERT_THROW(HexagonThreadManager(6, stack_size, 0x10000000), InternalError);
+  // hw resources count doesn't match thread count
+  ASSERT_THROW(HexagonThreadManager(6, stack_size, pipe_size, {DMA_0}), InternalError);
+  // hw resources doesn't match specific supported configuration
+  ASSERT_THROW(
+      HexagonThreadManager(6, stack_size, pipe_size, {DMA_0, HTP_0, HVX_0, HVX_1, HVX_2, DMA_0}),
+      InternalError);
+  // hw resources doesn't match specific supported configuration
+  ASSERT_THROW(HexagonThreadManager(5, stack_size, pipe_size, {DMA_0, HTP_0, HVX_0, HVX_1, HVX_2}),
+               InternalError);
 }
 
 TEST_F(HexagonThreadManagerTest, init) {
@@ -161,6 +172,7 @@ TEST_F(HexagonThreadManagerTest, pipe_fill) {
   CHECK_EQ(answer, 42);
 }
 
+// TODO(HWE): Create a temporary thread manager with a smaller pipe for this test
 TEST_F(HexagonThreadManagerTest, pipe_overflow) {
   // fill the pipe
   for (int i = 0; i < pipe_size; ++i) {

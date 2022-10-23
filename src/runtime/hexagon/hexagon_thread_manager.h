@@ -32,11 +32,24 @@
 #include "hexagon_buffer.h"
 #include "hexagon_buffer_manager.h"
 #include "hexagon_common.h"
+#include "hexagon_htp.h"
+#include "hexagon_hvx.h"
 #include "qurt.h"
 
 namespace tvm {
 namespace runtime {
 namespace hexagon {
+
+typedef enum {
+  NONE = -1,
+  DMA_0 = 0,
+  HTP_0,
+  HVX_0,
+  HVX_1,
+  HVX_2,
+  HVX_3,
+  MAX,
+} HardwareResourceType;
 
 class HexagonThreadManager {
   //! \brief Void function.
@@ -62,7 +75,8 @@ class HexagonThreadManager {
    * \param thread_stack_size_bytes Stack size in bytes per thread.
    * \param thread_pipe_size_words Pipe (or command buffer) size in words (or commands).
    */
-  HexagonThreadManager(unsigned, unsigned thread_stack_size_bytes, unsigned thread_pipe_size_words);
+  HexagonThreadManager(unsigned, unsigned thread_stack_size_bytes, unsigned thread_pipe_size_words,
+                       const std::vector<HardwareResourceType> = {});
 
   //! \brief Destructor
   ~HexagonThreadManager();
@@ -185,6 +199,17 @@ class HexagonThreadManager {
     void* args;
     Command(voidfunc f, void* args) : f(f), args(args) {}
   };
+
+  //! \brief List of hardware resources
+  std::vector<HardwareResourceType> hw_resources_;
+
+  //! \brief HTP hardware resource.
+  // TODO(HWE): Move binding of HTP to a specific thread
+  std::unique_ptr<HexagonHtp> htp_;
+
+  //! \brief HVX hardware resource.
+  // TODO(HWE): Move binding of individual HVX instances to a specific thread
+  std::unique_ptr<HexagonHvx> hvx_;
 };
 
 }  // namespace hexagon

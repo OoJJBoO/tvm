@@ -5295,25 +5295,6 @@ unsupported_onnx_tests = [
     "test_identity_sequence",
     "test_if_opt",
     "test_if_seq",
-    "test_layer_normalization_2d_axis0",
-    "test_layer_normalization_2d_axis1",
-    "test_layer_normalization_2d_axis_negative_1",
-    "test_layer_normalization_2d_axis_negative_2",
-    "test_layer_normalization_3d_axis0_epsilon",
-    "test_layer_normalization_3d_axis1_epsilon",
-    "test_layer_normalization_3d_axis2_epsilon",
-    "test_layer_normalization_3d_axis_negative_1_epsilon",
-    "test_layer_normalization_3d_axis_negative_2_epsilon",
-    "test_layer_normalization_3d_axis_negative_3_epsilon",
-    "test_layer_normalization_4d_axis0",
-    "test_layer_normalization_4d_axis1",
-    "test_layer_normalization_4d_axis2",
-    "test_layer_normalization_4d_axis3",
-    "test_layer_normalization_4d_axis_negative_1",
-    "test_layer_normalization_4d_axis_negative_2",
-    "test_layer_normalization_4d_axis_negative_3",
-    "test_layer_normalization_4d_axis_negative_4",
-    "test_layer_normalization_default_axis",
     "test_loop11",
     "test_loop13_seq",
     "test_loop16_seq_none",
@@ -5504,7 +5485,6 @@ def test_aten(target, dev):
             operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN,
         )
         onnx_model = onnx.load(file_name)
-        assert 's: "embedding_bag"' in str(onnx_model)
         return onnx_model
 
     def verify_embedding_bag(num_embedding, embedding_dim, data_shape, num_bags=None):
