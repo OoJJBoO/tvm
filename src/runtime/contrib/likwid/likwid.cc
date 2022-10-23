@@ -194,27 +194,36 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
     void Init(Array<DeviceWrapper> devices) override {
         likwid_markerInit();
         likwid_markerThreadInit();
+        // Since currently we use a combination of the marker API for 
+        // initialization and perfmon calls for actual readings, we need to
+        // open a marker region to prevent LIKWID printing warnings when the
+        // process terminates. This should not be an issue once we replace the
+        // marker API calls with manual perfmon initialization.
         _marker_start_region();
     }
 
-    /*! \brief Start marker region and begin collecting data.
+    /*! \brief Begin collecting counter data.
      *
      * \param device Not used by this collector at the moment.
      * \returns A `LikwidEventSetNode` containing the values read at the start 
      * of the call. Used by the next `Stop` call to determine difference.
     */
     ObjectRef Start(Device device) override {
+        if (device.device_type != kDLCPU) {
+            LOG(WARNING) << "For now, this collector only supports CPUs!";
+        }
         auto start_values = _perfmon_read_and_get_results();
         return ObjectRef(make_object<LikwidEventSetNode>(start_values, device));
     }
 
-    /*! \brief Stop marker region and end data collection.
+    /*! \brief End data collection and report results.
      *
      * \param object The previously created `LikwidEventSetNode`.
      * \returns A mapping from the names of the collected metrics to their 
      * corresponding values.
     */
     Map<String, ObjectRef> Stop(ObjectRef object) override {
+        // Collect event counts
         std::unordered_map<String, ObjectRef> reported_metrics;
         const LikwidEventSetNode* event_set_node = object.as<LikwidEventSetNode>();
         const auto end_values = _perfmon_read_and_get_results();
@@ -246,9 +255,12 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
             }
             reported_metrics[name] = ObjectRef(make_object<CountNode>(total));
         }
+
         if (!_collect_derived_metrics) {
             return reported_metrics;
         }
+
+        // Collect metric results
         const auto metric_values = _perfmon_read_and_get_metrics();
         for (const auto& name_result : metric_values) {
             std::string metric_name = name_result.first;
@@ -272,9 +284,10 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
         return reported_metrics;
     }
 
-    /*! \brief Close marker region and remove connection to likwid-perfctr API.
+    /*! \brief Close connection to likwid-perfctr API.
     */
     ~LikwidMetricCollectorNode() final {
+        // Close the marker region we started in the initialization step.
         _marker_stop_region();
         likwid_markerClose();
     }
