@@ -80,7 +80,23 @@ inline void _marker_read_event_counts(int* nevents, double* events, double* time
 inline void _perfmon_read_group(int group_id) {
     int status = perfmon_readGroupCounters(group_id);
     if (status < 0) {
-        LOG(WARNING) << "Error while reading group counters! Status: " << status;
+        LOG(ERROR) << "Error while reading group counters! Status: " << status;
+    }
+}
+
+/*! \brief Start perfmon counters and print errors. */
+inline void _perfmon_start_counters() {
+    int status = perfmon_startCounters();
+    if (status != 0) {
+        LOG(ERROR) << "Could not start counters! Status: " << status;
+    }
+}
+
+/*! \brief Stop perfmon counters and print errors. */
+inline void _perfmon_stop_counters() {
+    int status = perfmon_stopCounters();
+    if (status != 0) {
+        LOG(ERROR) << "Could not stop counters! Status: " << status;
     }
 }
 
@@ -176,6 +192,7 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
     void Init(Array<DeviceWrapper> devices) override {
         likwid_markerInit();
         likwid_markerThreadInit();
+        _marker_start_region();
     }
 
     /*! \brief Start marker region and begin collecting data.
@@ -233,6 +250,7 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
     /*! \brief Close marker region and remove connection to likwid-perfctr API.
     */
     ~LikwidMetricCollectorNode() final {
+        _marker_stop_region();
         likwid_markerClose();
     }
 
