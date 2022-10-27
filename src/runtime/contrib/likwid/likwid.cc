@@ -200,6 +200,7 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
         // process terminates. This should not be an issue once we replace the
         // marker API calls with manual perfmon initialization.
         _marker_start_region();
+        _marker_stop_region();
     }
 
     /*! \brief Begin collecting counter data.
@@ -287,8 +288,6 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
     /*! \brief Close connection to likwid-perfctr API.
     */
     ~LikwidMetricCollectorNode() final {
-        // Close the marker region we started in the initialization step.
-        _marker_stop_region();
         likwid_markerClose();
     }
 
