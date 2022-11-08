@@ -103,7 +103,7 @@ def bitserial_conv2d_nhwc(
     oh, vh = cfg.define_split("tile_oh", oh, num_outputs=2, filter=lambda x: x.size[-1] >= 2)
     ow, vw = cfg.define_split("tile_ow", ow, num_outputs=2, filter=lambda x: x.size[-1] >= 2)
     ci_o, ci_i = cfg.define_split(
-        "tile_ci", ci, num_outputs=2, filter=lambda x: x.size[-1] == 8 or x.size[-1] == 16
+        "tile_ci", ci, num_outputs=2, filter=lambda x: x.size[-1] == 4 or x.size[-1] == 8 or x.size[-1] == 16
     )
     re_axes = cfg.define_reorder(
         "reorder_0",

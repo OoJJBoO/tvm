@@ -178,14 +178,15 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
     
     /*! \brief Construct a new collector node object.
      *
-     * \param collect_raw_events If this is true, also collect the raw events 
-     * used in the set event group instead of only the derived metrics.
+     * \param collect_raw_events If this is true, collect raw event counts
+     * \param collect_derived_metrics If this is true, collect the derived 
+     * metrics of the set event group instead of only the raw event counts.
      * \param collect_thread_values If this is true, also collect the event
      * counts of each known thread instead of only the total.
      * \todo Add compatibility check!
     */
-    explicit LikwidMetricCollectorNode(bool collect_raw_events, bool collect_thread_values)
-    : _collect_derived_metrics(collect_raw_events), _collect_thread_values(collect_thread_values) {}
+    explicit LikwidMetricCollectorNode(bool collect_raw_events, bool collect_derived_metrics, bool collect_thread_values)
+    : _collect_raw_events(collect_raw_events), _collect_derived_metrics(collect_derived_metrics), _collect_thread_values(collect_thread_values) {}
 
     /*! \brief Initialization call. Establish connection to likwid-perfctr API.
      *
@@ -224,63 +225,63 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
      * corresponding values.
     */
     Map<String, ObjectRef> Stop(ObjectRef object) override {
-        // Collect event counts
         std::unordered_map<String, ObjectRef> reported_metrics;
         const LikwidEventSetNode* event_set_node = object.as<LikwidEventSetNode>();
-        const auto end_values = _perfmon_read_and_get_results();
-        for (const auto& name_result : end_values) {
-            std::string event_name = name_result.first;
-            std::vector<double> end_thread_values = name_result.second;
-            std::vector<double> start_thread_values = event_set_node->start_values.at(event_name);
-            double total = 0;
-            for (std::size_t thread_id{}; thread_id < end_thread_values.size(); ++thread_id) {
-                std::string name = event_name + " [Thread " + std::to_string(thread_id) + "]";
-                double diff = end_thread_values[thread_id] - start_thread_values[thread_id];
-                if (diff < 0) {
-                    LOG(WARNING) << OVERFLOW_WARNING;
-                    if (!_collect_thread_values) {
-                        continue;
+        // Collect event counts
+        if (_collect_raw_events)
+        {
+            const auto end_values = _perfmon_read_and_get_results();
+            for (const auto& name_result : end_values) {
+                std::string event_name = name_result.first;
+                std::vector<double> end_thread_values = name_result.second;
+                std::vector<double> start_thread_values = event_set_node->start_values.at(event_name);
+                double total = 0;
+                for (std::size_t thread_id{}; thread_id < end_thread_values.size(); ++thread_id) {
+                    std::string name = event_name + " [Thread " + std::to_string(thread_id) + "]";
+                    double diff = end_thread_values[thread_id] - start_thread_values[thread_id];
+                    if (diff < 0) {
+                        LOG(WARNING) << OVERFLOW_WARNING;
+                        if (!_collect_thread_values) {
+                            continue;
+                        }
+                        reported_metrics[name] = ObjectRef(make_object<CountNode>(-1));
+                    } else {
+                        total += diff;
+                        if (!_collect_thread_values) {
+                            continue;
+                        }
+                        reported_metrics[name] = ObjectRef(make_object<CountNode>(diff));
                     }
-                    reported_metrics[name] = ObjectRef(make_object<CountNode>(-1));
-                } else {
-                    total += diff;
-                    if (!_collect_thread_values) {
-                        continue;
-                    }
-                    reported_metrics[name] = ObjectRef(make_object<CountNode>(diff));
                 }
+                std::string name = event_name;
+                if (_collect_thread_values) {
+                    name += " [Total]";
+                }
+                reported_metrics[name] = ObjectRef(make_object<CountNode>(total));
             }
-            std::string name = event_name;
-            if (_collect_thread_values) {
-                name += " [Total]";
-            }
-            reported_metrics[name] = ObjectRef(make_object<CountNode>(total));
         }
-
-        if (!_collect_derived_metrics) {
-            return reported_metrics;
-        }
-
         // Collect metric results
-        const auto metric_values = _perfmon_read_and_get_metrics();
-        for (const auto& name_result : metric_values) {
-            std::string metric_name = name_result.first;
-            std::vector<double> metric_values = name_result.second;
-            double total = 0;
-            for (std::size_t thread_id{}; thread_id < metric_values.size(); ++thread_id) {
-                std::string name = metric_name + " [Thread " + std::to_string(thread_id) + "]";
-                double count = metric_values[thread_id];
-                total += count;
-                if (!_collect_thread_values) {
-                    continue;
+        if (_collect_derived_metrics) {
+            const auto metric_values = _perfmon_read_and_get_metrics();
+            for (const auto& name_result : metric_values) {
+                std::string metric_name = name_result.first;
+                std::vector<double> metric_values = name_result.second;
+                double total = 0;
+                for (std::size_t thread_id{}; thread_id < metric_values.size(); ++thread_id) {
+                    std::string name = metric_name + " [Thread " + std::to_string(thread_id) + "]";
+                    double count = metric_values[thread_id];
+                    total += count;
+                    if (!_collect_thread_values) {
+                        continue;
+                    }
+                    reported_metrics[name] = ObjectRef(make_object<RatioNode>(count));
                 }
-                reported_metrics[name] = ObjectRef(make_object<RatioNode>(count));
+                std::string name = metric_name;
+                if (_collect_thread_values) {
+                    name += " [Total]";
+                }
+                reported_metrics[name] = ObjectRef(make_object<RatioNode>(total));
             }
-            std::string name = metric_name;
-            if (_collect_thread_values) {
-                name += " [Total]";
-            }
-            reported_metrics[name] = ObjectRef(make_object<RatioNode>(total));
         }
         return reported_metrics;
     }
@@ -292,6 +293,7 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
     }
 
 private:
+    bool _collect_raw_events;
     bool _collect_derived_metrics;
     bool _collect_thread_values;
 
@@ -303,8 +305,8 @@ public:
 /*! Wrapper for `LikwidMetricCollectorNode`. */
 class LikwidMetricCollector : public MetricCollector {
 public:
-    explicit LikwidMetricCollector(bool collect_derived_metrics, bool collect_thread_values) {
-        data_ = make_object<LikwidMetricCollectorNode>(collect_derived_metrics, collect_thread_values);
+    explicit LikwidMetricCollector(bool collect_raw_events, bool collect_derived_metrics, bool collect_thread_values) {
+        data_ = make_object<LikwidMetricCollectorNode>(collect_raw_events, collect_derived_metrics, collect_thread_values);
     }
     TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(LikwidMetricCollector, MetricCollector, 
                                           LikwidMetricCollectorNode);
@@ -317,21 +319,22 @@ public:
  * \note Please make sure to run TVM through the likwid-perfctr wrapper 
  * application following the instructions given in the Likwid documentation!
  * 
- * \param collect_derived_metrics If this is true, also collect the derived 
+ * \param collect_raw_events If this is true, collect raw event counts
+ * \param collect_derived_metrics If this is true, collect the derived 
  * metrics of the set event group instead of only the raw event counts.
  * \param collect_thread_values If this is true, also collect the event
  * counts of each known thread instead of only the total.
  */
-MetricCollector CreateLikwidMetricCollector(bool collect_derived_metrics = false, bool collect_thread_values = false) {
-    return LikwidMetricCollector(collect_derived_metrics, collect_thread_values);
+MetricCollector CreateLikwidMetricCollector(bool collect_raw_events, bool collect_derived_metrics = false, bool collect_thread_values = false) {
+    return LikwidMetricCollector(collect_raw_events, collect_derived_metrics, collect_thread_values);
 }
 
 TVM_REGISTER_OBJECT_TYPE(LikwidEventSetNode);
 TVM_REGISTER_OBJECT_TYPE(LikwidMetricCollectorNode);
 
 TVM_REGISTER_GLOBAL("runtime.profiling.LikwidMetricCollector")
-    .set_body_typed([](bool collect_derived_metrics, bool collect_thread_values) {
-        return LikwidMetricCollector(collect_derived_metrics, collect_thread_values);
+    .set_body_typed([](bool collect_raw_events, bool collect_derived_metrics, bool collect_thread_values) {
+        return LikwidMetricCollector(collect_raw_events, collect_derived_metrics, collect_thread_values);
     });
 
 TVM_REGISTER_GLOBAL("runtime.rpc_likwid_profile_func").set_body_typed(
@@ -346,19 +349,20 @@ TVM_REGISTER_GLOBAL("runtime.rpc_likwid_profile_func").set_body_typed(
  *
  * \param vm_mod The `Module` containing the profiler vm to profile on.
  * \param func_name The name of the function to profile.
- * \param collect_derived_metrics If this is true, also collect the derived 
+ * \param collect_raw_events If this is true, collect raw event counts
+ * \param collect_derived_metrics If this is true, collect the derived 
  * metrics of the set event group instead of only the raw event counts.
  * \param collect_thread_values If this is true, also collect the event
  * counts of each known thread instead of only the total.
  * \returns The serialized `Report` of the profiling run.
 */
-std::string rpc_likwid_profile_func(Module vm_mod, std::string func_name, bool collect_derived_metrics, bool collect_thread_values) {
+std::string rpc_likwid_profile_func(Module vm_mod, std::string func_name, bool collect_raw_events, bool collect_derived_metrics, bool collect_thread_values) {
     LOG(INFO) << "Received profiling request for function " << func_name;
     auto profile_func = vm_mod.GetFunction("profile");
     Array<MetricCollector> collectors({
-        CreateLikwidMetricCollector(collect_derived_metrics, collect_thread_values)
+        CreateLikwidMetricCollector(collect_raw_events, collect_derived_metrics, collect_thread_values)
     });
-    LOG(INFO) << "Beginning profiling...";
+    LOG(INFO) << "Begin profiling...";
     Report report = profile_func(func_name, collectors);
     LOG(INFO) << "Done. Sending serialized report.";
     return std::string(report->AsJSON().c_str());
