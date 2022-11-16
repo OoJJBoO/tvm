@@ -16,7 +16,7 @@ namespace likwid {
 
 constexpr const char* REGION_NAME = "LikwidMetricCollector";
 constexpr const char* OVERFLOW_WARNING = "Detected overflow while reading performance counter, setting value to -1!";
-constexpr const char* NAN_WARNING = "Encountered NaN value, setting it to 0 instead!";
+constexpr const char* NAN_WARNING = "Encountered NaN value, setting it to -1 instead and skipping it on total count!";
 constexpr const char* NO_METRICS_WARNING = "Current event group does not have any metrics! Maybe consider enabling collection of raw events?";
 constexpr const char* THREAD_COUNT_ERROR = "No threads are known to LIKWID perfmon!";
 
@@ -262,7 +262,7 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
                     } else if (isnan(diff)) {
                         LOG(WARNING) << NAN_WARNING;
                         // We need to prevent NaN values, else we will not be
-                        // able to deserialize reports later!
+                        // able to deserialize reports later
                         if (!_collect_thread_values) {
                             continue;
                         }
@@ -295,7 +295,7 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
                     if (isnan(count)) {
                         LOG(WARNING) << NAN_WARNING;
                         // We need to filter out NaN values, else we will not 
-                        // be able to deserialize reports later!
+                        // be able to deserialize reports later
                         if (!_collect_thread_values) {
                             continue;
                         }
