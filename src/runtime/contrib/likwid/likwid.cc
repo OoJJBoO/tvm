@@ -24,6 +24,7 @@ constexpr const char* THREAD_COUNT_ERROR = "No threads are known to LIKWID perfm
 
 /*! \brief Register default marker region and print errors. */
 inline void _marker_register_region() {
+    LOG(INFO) << "Register marker region...";
     int status = likwid_markerRegisterRegion(REGION_NAME);
     if (status != 0) {
         LOG(ERROR) << "Could not register region! Status: " << status;
@@ -32,6 +33,7 @@ inline void _marker_register_region() {
 
 /*! \brief Start default marker region and print errors. */
 inline void _marker_start_region() {
+    LOG(INFO) << "Start marker region...";
     int status = likwid_markerStartRegion(REGION_NAME);
     if (status != 0) {
         LOG(ERROR) << "Could not start marker region! Status: " << status;
@@ -40,6 +42,7 @@ inline void _marker_start_region() {
 
 /*! \brief Stop default marker region and print errors. */
 inline void _marker_stop_region() {
+    LOG(INFO) << "Stop marker region...";
     int status = likwid_markerStopRegion(REGION_NAME);
     if (status != 0) {
         LOG(ERROR) << "Could not stop marker region! Status: " << status;
@@ -56,6 +59,7 @@ inline void _marker_stop_region() {
  * \param count [out] The call count of the marker region.
 */
 inline void _marker_get_region(const char* region_tag, int* nevents, double* events, double* time, int* count) {
+    LOG(INFO) << "Get marker region...";
     likwid_markerGetRegion(region_tag, nevents, events, time, count);
     if (nevents == 0) {
         LOG(WARNING) << "Event count is zero!";
@@ -71,6 +75,7 @@ inline void _marker_get_region(const char* region_tag, int* nevents, double* eve
  * \param count [out] The call count of the marker region.
 */
 inline void _marker_read_event_counts(int* nevents, double* events, double* time, int* count) {
+    LOG(INFO) << "Read marker event counts...";
     _marker_stop_region();
     _marker_get_region(REGION_NAME, nevents, events, time, count);
     _marker_start_region();
@@ -78,6 +83,7 @@ inline void _marker_read_event_counts(int* nevents, double* events, double* time
 
 /*! \brief Read all counters of the given group ID and print errors. */
 inline void _perfmon_read_group(int group_id) {
+    LOG(INFO) << "Read group counters...";
     int status = perfmon_readGroupCounters(group_id);
     if (status < 0) {
         LOG(ERROR) << "Error while reading group counters! Status: " << status;
@@ -86,6 +92,7 @@ inline void _perfmon_read_group(int group_id) {
 
 /*! \brief Start perfmon counters and print errors. */
 inline void _perfmon_start_counters() {
+    LOG(INFO) << "Start counters...";
     int status = perfmon_startCounters();
     if (status != 0) {
         LOG(ERROR) << "Could not start counters! Status: " << status;
@@ -94,6 +101,7 @@ inline void _perfmon_start_counters() {
 
 /*! \brief Stop perfmon counters and print errors. */
 inline void _perfmon_stop_counters() {
+    LOG(INFO) << "Stop counters...";
     int status = perfmon_stopCounters();
     if (status != 0) {
         LOG(ERROR) << "Could not stop counters! Status: " << status;
@@ -107,6 +115,7 @@ inline void _perfmon_stop_counters() {
  * event group to a list of their respective per-thread counts.
 */
 std::unordered_map<std::string, std::vector<double>> _perfmon_read_and_get_metrics() {
+    LOG(INFO) << "Read and get metrics...";
     int group_id = perfmon_getIdOfActiveGroup();
     _perfmon_read_group(group_id);
     int number_of_metrics = perfmon_getNumberOfMetrics(group_id);
@@ -130,6 +139,7 @@ std::unordered_map<std::string, std::vector<double>> _perfmon_read_and_get_metri
  * event group to a list of their respective per-thread counts.
 */
 std::unordered_map<std::string, std::vector<double>> _perfmon_read_and_get_results() {
+    LOG(INFO) << "Read and get results...";
     int group_id = perfmon_getIdOfActiveGroup();
     _perfmon_read_group(group_id);
     int number_of_events = perfmon_getNumberOfEvents(group_id);
@@ -193,7 +203,9 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
      * \param devices Not used by this collector at the moment.
     */
     void Init(Array<DeviceWrapper> devices) override {
+        LOG(INFO) << "Initialize marker...";
         likwid_markerInit();
+        LOG(INFO) << "Initialize marker thread...";
         likwid_markerThreadInit();
         // Since currently we use a combination of the marker API for 
         // initialization and perfmon calls for actual readings, we need to
