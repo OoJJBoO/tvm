@@ -1,4 +1,5 @@
 #include <likwid.h>
+#include <math.h>
 #include <tvm/runtime/contrib/likwid.h>
 
 #include <string>
@@ -14,7 +15,8 @@ namespace likwid {
 // ------------------------------------------------------------------------------------------------
 
 constexpr const char* REGION_NAME = "LikwidMetricCollector";
-constexpr const char* OVERFLOW_WARNING = "Detected overflow while reading performance counter, setting value to -1";
+constexpr const char* OVERFLOW_WARNING = "Detected overflow while reading performance counter, setting value to -1!";
+constexpr const char* NAN_WARNING = "Encountered NaN value, setting it to 0 instead!";
 constexpr const char* NO_METRICS_WARNING = "Current event group does not have any metrics! Maybe consider enabling collection of raw events?";
 constexpr const char* THREAD_COUNT_ERROR = "No threads are known to LIKWID perfmon!";
 
@@ -257,6 +259,14 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
                             continue;
                         }
                         reported_metrics[name] = ObjectRef(make_object<CountNode>(-1));
+                    } else if (isnan(diff)) {
+                        LOG(WARNING) << NAN_WARNING;
+                        // We need to prevent NaN values, else we will not be
+                        // able to deserialize reports later!
+                        if (!_collect_thread_values) {
+                            continue;
+                        }
+                        reported_metrics[name] = ObjectRef(make_object<CountNode>(-1));
                     } else {
                         total += diff;
                         if (!_collect_thread_values) {
@@ -282,11 +292,21 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
                 for (std::size_t thread_id{}; thread_id < metric_values.size(); ++thread_id) {
                     std::string name = metric_name + " [Thread " + std::to_string(thread_id) + "]";
                     double count = metric_values[thread_id];
-                    total += count;
-                    if (!_collect_thread_values) {
-                        continue;
+                    if (isnan(count)) {
+                        LOG(WARNING) << NAN_WARNING;
+                        // We need to filter out NaN values, else we will not 
+                        // be able to deserialize reports later!
+                        if (!_collect_thread_values) {
+                            continue;
+                        }
+                        reported_metrics[name] = ObjectRef(make_object<RatioNode>(-1));
+                    } else {
+                        total += count;
+                        if (!_collect_thread_values) {
+                            continue;
+                        }
+                        reported_metrics[name] = ObjectRef(make_object<RatioNode>(count));
                     }
-                    reported_metrics[name] = ObjectRef(make_object<RatioNode>(count));
                 }
                 std::string name = metric_name;
                 if (_collect_thread_values) {
