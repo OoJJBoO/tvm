@@ -207,21 +207,21 @@ def conv2d_strategy_arm_cpu(attrs, inputs, out_type, target):
                     name="conv2d_nhwc_dsp.arm_cpu",
                 )
             elif kernel_layout == "HWIO":
-                is_aarch64 = topi.arm_cpu.arm_utils.is_aarch64_arm()
-                has_dot_prod = topi.arm_cpu.arm_utils.is_dotprod_available()
+                has_asimd = target.features.has_asimd
+                has_dot_prod = target.features.has_dotprod
                 if has_dot_prod and data.dtype in ["int8", "uint8"]:
                     strategy.add_implementation(
                         wrap_compute_conv2d(topi.arm_cpu.compute_conv2d_NHWC_quantized_native),
                         wrap_topi_schedule(topi.arm_cpu.schedule_conv2d_NHWC_quantized_native),
                         name="conv2d_NHWC_quantized_native.arm_cpu",
                     )
-                if is_aarch64 and data.dtype in ["int8", "uint8"]:
+                if has_asimd and data.dtype in ["int8", "uint8"]:
                     strategy.add_implementation(
                         wrap_compute_conv2d(topi.arm_cpu.compute_conv2d_NHWC_quantized_interleaved),
                         wrap_topi_schedule(topi.arm_cpu.schedule_conv2d_NHWC_quantized_interleaved),
                         name="conv2d_NHWC_quantized_interleaved.arm_cpu",
                     )
-                if (not is_aarch64) or (data.dtype not in ["int8", "uint8"]):
+                if (not has_asimd) or (data.dtype not in ["int8", "uint8"]):
                     # TODO(@giuseros)
                     # This strategy errors out for quantized data types when tuning.
                     # Let's use this only for non-aarch64 or non-quantized cases
@@ -283,8 +283,7 @@ def conv2d_strategy_arm_cpu(attrs, inputs, out_type, target):
                 )
         elif layout == "NHWC":
             assert kernel_layout == "HWOI"
-            is_aarch64 = topi.arm_cpu.arm_utils.is_aarch64_arm()
-            if is_aarch64 or "+neon" in target.mattr:
+            if target.features.has_asimd:
                 strategy.add_implementation(
                     wrap_compute_conv2d(topi.arm_cpu.compute_depthwise_conv2d_nhwc),
                     wrap_topi_schedule(topi.arm_cpu.schedule_depthwise_conv2d_nhwc),
@@ -396,9 +395,9 @@ def wrap_compute_conv2d_winograd_nnpack(topi_compute):
     return _compute_conv2d_nnpack
 
 
-@conv2d_winograd_without_weight_transfrom_strategy.register("arm_cpu")
-def conv2d_winograd_without_weight_transfrom_strategy_arm_cpu(attrs, inputs, out_type, target):
-    """conv2d_winograd_without_weight_transfrom arm cpu strategy"""
+@conv2d_winograd_without_weight_transform_strategy.register("arm_cpu")
+def conv2d_winograd_without_weight_transform_strategy_arm_cpu(attrs, inputs, out_type, target):
+    """conv2d_winograd_without_weight_transform arm cpu strategy"""
     dilation = attrs.get_int_tuple("dilation")
     groups = attrs.get_int("groups")
     layout = attrs.data_layout
@@ -406,7 +405,7 @@ def conv2d_winograd_without_weight_transfrom_strategy_arm_cpu(attrs, inputs, out
     kernel = inputs[1]
     assert dilation == (1, 1), "Do not support dilate now"
     assert strides == (1, 1), "Do not support strides now"
-    assert groups == 1, "Do not supoort arbitrary group number"
+    assert groups == 1, "Do not support arbitrary group number"
     strategy = _op.OpStrategy()
     if layout == "NCHW":
         if len(kernel.shape) == 5:
@@ -437,7 +436,7 @@ def conv2d_winograd_without_weight_transfrom_strategy_arm_cpu(attrs, inputs, out
             raise RuntimeError("Unsupported kernel shape: {}".format(kernel.shape))
     else:
         raise RuntimeError(
-            "Unsupported conv2d_winograd_without_weight_transfrom layout {}".format(layout)
+            "Unsupported conv2d_winograd_without_weight_transform layout {}".format(layout)
         )
     return strategy
 
@@ -464,7 +463,7 @@ def wrap_compute_conv2d_gemm(topi_compute):
 
 @conv2d_gemm_without_weight_transform_strategy.register("arm_cpu")
 def conv2d_gemm_without_weight_transform_strategy_arm_cpu(attrs, inputs, out_type, target):
-    """conv2d_winograd_without_weight_transfrom arm cpu strategy"""
+    """conv2d_winograd_without_weight_transform arm cpu strategy"""
     layout = attrs.data_layout
     data = inputs[0]
     strategy = _op.OpStrategy()
