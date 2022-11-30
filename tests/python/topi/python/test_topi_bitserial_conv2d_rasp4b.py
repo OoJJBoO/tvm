@@ -69,7 +69,7 @@ def verify_bitserial_conv2d_nhwc_not_intrinsics(
 
     dev = tvm.device(device, 0)
     if "arm" not in os.uname()[4]:
-        print("Skipped running code, not an aarch64 device")
+        print("Skipped running code, not an arm device")
         return
 
     print("Running on target: %s" % device)
