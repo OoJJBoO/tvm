@@ -211,7 +211,7 @@ def schedule_bitserial_dense(cfg, outs):
     return s
 
 
-@autotvm.register_topi_schedule("bitserial_dense.arm_cpu")
+@autotvm.register_topi_schedule("bitserial_dense_no_intrinsics.arm_cpu")
 def schedule_bitserial_dense_no_intrinsics(cfg, outs):
     """Schedule for binary_dense that does not use the arm32 intrinsic popcount.
 

@@ -481,7 +481,7 @@ def _schedule_spatial_conv2d_nhwc_no_intrinsics(
     return s
 
 
-@autotvm.register_topi_schedule("bitserial_conv2d_nhwc.arm_cpu")
+@autotvm.register_topi_schedule("bitserial_conv2d_nhwc_no_intrinsics.arm_cpu")
 def schedule_bitserial_conv2d_nhwc_no_intrinsics(cfg, outs):
     """Arm cpu schedule for bitserial conv2d without the arm32 intrinsics"""
     s = te.create_schedule([x.op for x in outs])
