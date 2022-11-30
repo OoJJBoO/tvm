@@ -62,8 +62,8 @@ def verify_bitserial_conv2d_nhwc(
     func = tvm.build(s, [A, W, B], device)
 
     dev = tvm.device(device, 0)
-    if "arm" not in os.uname()[4]:
-        print("Skipped running code, not an arm device")
+    if "aarch64" not in os.uname()[4]:
+        print("Skipped running code, not an aarch64 device")
         return
 
     print("Running on target: %s" % device)
