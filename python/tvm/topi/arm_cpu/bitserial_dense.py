@@ -209,3 +209,69 @@ def schedule_bitserial_dense(cfg, outs):
 
     traverse(outs[0].op)
     return s
+
+
+@autotvm.register_topi_schedule("bitserial_dense.arm_cpu")
+def schedule_bitserial_dense_no_intrinsics(cfg, outs):
+    """Schedule for binary_dense that does not use the arm32 intrinsic popcount.
+
+    Parameters
+    ----------
+    outs: Array of Tensor
+        The computation graph description of bitserial dense operator.
+        in the format of an array of tensors.
+
+    Returns
+    -------
+    s: Schedule
+        The computation schedule for bitserial_dense.
+    """
+    outs = [outs] if isinstance(outs, te.tensor.Tensor) else outs
+    s = te.create_schedule([x.op for x in outs])
+
+    def _schedule(cfg, s, data_vec, weight_vec, output, unipolar):
+
+        z, k, _, y, x = s[weight_vec].op.axis
+        s[weight_vec].parallel(z)
+        s[weight_vec].vectorize(x)
+
+        x, y = s[output].op.axis
+        wb, db, k = s[output].op.reduce_axis
+        _, DB, _ = get_const_tuple(data_vec.shape)
+        _, _, WB, _, _ = get_const_tuple(weight_vec.shape)
+
+        yo, yi = cfg["tile_y"].apply(s, output, y)
+        xo, xi = cfg["tile_x"].apply(s, output, x)
+        ko, ki = cfg["tile_k"].apply(s, output, k)
+
+        cfg["reorder_0"].apply(s, output, [yo, xo, ko, xi, wb, db, yi, ki])
+
+        fused = s[output].fuse(xo, yo)
+        s[output].parallel(fused)
+        return s
+
+    def traverse(op):
+        """Internal traverse function"""
+        # inline all one-to-one-mapping operators except the last stage (output)
+        if tag.is_broadcast(op.tag) or "elemwise" in op.tag:
+            if op not in s.outputs:
+                s[op].compute_inline()
+            for tensor in op.input_tensors:
+                if isinstance(tensor.op, tvm.te.ComputeOp):
+                    traverse(tensor.op)
+
+        elif op.tag == "bitserial_dense" or "bitserial_dense_unipolar":
+            output = op.output(0)
+            weight_vec = op.input_tensors[0]
+
+            data_vec = op.input_tensors[1]
+            data = data_vec.op.input_tensors[0]
+            if "QuantizeInput" in data.op.name:
+                data = data.op.input_tensors[0]
+            unipolar = output.op.tag == "bitserial_dense_unipolar"
+            _schedule(cfg, s, data_vec, weight_vec, output, unipolar)
+        else:
+            raise RuntimeError("Unsupported operator: %s" % op.tag)
+
+    traverse(outs[0].op)
+    return s

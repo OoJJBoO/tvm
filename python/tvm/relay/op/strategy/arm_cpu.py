@@ -523,11 +523,22 @@ def bitserial_conv2d_strategy_arm_cpu(attrs, inputs, out_type, target):
             name="bitserial_conv2d_nchw.arm_cpu",
         )
     elif layout == "NHWC":
-        strategy.add_implementation(
-            wrap_compute_bitserial_conv2d(topi.arm_cpu.bitserial_conv2d_nhwc),
-            wrap_topi_schedule(topi.arm_cpu.schedule_bitserial_conv2d_nhwc),
-            name="bitserial_conv2d_nhwc.arm_cpu",
-        )
+        # Since the intrinsic popcount uses arm32 specific instructions, we can 
+        # not use it on aarch64. This should not affect performance much, since
+        # LLVM produces more efficient aarch64 popcount assembly code consisting
+        # of less instructions than the arm32 codegen.
+        if target.features.is_aarch64:
+            strategy.add_implementation(
+                wrap_compute_bitserial_conv2d(topi.arm_cpu.bitserial_conv2d_nhwc),
+                wrap_topi_schedule(topi.arm_cpu.schedule_bitserial_conv2d_nhwc_no_intrinsics),
+                name="bitserial_conv2d_nhwc.arm_cpu",
+            )
+        else:
+            strategy.add_implementation(
+                wrap_compute_bitserial_conv2d(topi.arm_cpu.bitserial_conv2d_nhwc),
+                wrap_topi_schedule(topi.arm_cpu.schedule_bitserial_conv2d_nhwc),
+                name="bitserial_conv2d_nhwc.arm_cpu",
+            )
     else:
         raise ValueError("Data layout {} not supported.".format(layout))
     return strategy
@@ -537,11 +548,22 @@ def bitserial_conv2d_strategy_arm_cpu(attrs, inputs, out_type, target):
 def schedule_bitserial_dense_arm_cpu(attrs, inputs, out_type, target):
     """bitserial_dense arm cpu strategy"""
     strategy = _op.OpStrategy()
-    strategy.add_implementation(
-        wrap_compute_bitserial_dense(topi.arm_cpu.bitserial_dense),
-        wrap_topi_schedule(topi.arm_cpu.schedule_bitserial_dense),
-        name="bitserial_dense.arm_cpu",
-    )
+    # Since the intrinsic popcount uses arm32 specific instructions, we can not
+    # use it on aarch64. This should not affect performance much, since LLVM
+    # produces more efficient aarch64 popcount assembly code consisting of less
+    # instructions than the arm32 codegen.
+    if target.is_aarch64:
+        strategy.add_implementation(
+            wrap_compute_bitserial_dense(topi.arm_cpu.bitserial_dense),
+            wrap_topi_schedule(topi.arm_cpu.schedule_bitserial_dense_no_intrinsics),
+            name="bitserial_dense.arm_cpu",
+        )
+    else:
+        strategy.add_implementation(
+            wrap_compute_bitserial_dense(topi.arm_cpu.bitserial_dense),
+            wrap_topi_schedule(topi.arm_cpu.schedule_bitserial_dense),
+            name="bitserial_dense.arm_cpu",
+        )
     return strategy
 
 

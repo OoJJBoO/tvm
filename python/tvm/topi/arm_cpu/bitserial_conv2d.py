@@ -430,6 +430,84 @@ def schedule_bitserial_conv2d_nhwc(cfg, outs):
     return s
 
 
+# ARM specific schedule that is not using arm32 custom microkernel
+def _schedule_spatial_conv2d_nhwc_no_intrinsics(
+    cfg, s, data_pad, data_vec, kernel_vec, conv_out, output, last, unipolar
+):
+    _, _, _, _, _, IB, CI = data_vec.shape
+    _, KH, KW, KB, _, _ = kernel_vec.shape
+    KB = get_const_int(KB)
+    IB = get_const_int(IB)
+
+    VC = cfg["tile_co"].size[-1]
+    VH = cfg["tile_oh"].size[-1]
+    VW = cfg["tile_ow"].size[-1]
+
+    ##### Schedule data padding and  packing
+    if data_pad is not None:
+        s[data_pad].compute_inline()
+
+    _, h, _, _, _, _, _ = s[data_vec].op.axis
+    cfg.define_split("tile_ah", cfg.axis(h), num_outputs=2, max_factor=32)
+    oh, ih = cfg["tile_ah"].apply(s, data_vec, h)
+    s[data_vec].parallel(oh)
+
+    #### Schedule kernel packing
+    co, _, _, _, _, _ = s[kernel_vec].op.axis
+    cfg.define_split("tile_bco", cfg.axis(co), num_outputs=2, max_factor=32)
+    oco, ico = cfg["tile_bco"].apply(s, kernel_vec, co)
+    s[kernel_vec].parallel(oco)
+
+    ##### Schedule Convolution
+    n, oh, ow, co, vh, vw, vc = s[conv_out].op.axis
+    kh, kw, kb, ib, ci = s[conv_out].op.reduce_axis
+
+    ci_o, ci_i = cfg["tile_ci"].apply(s, conv_out, ci)
+    re_axes = cfg["reorder_0"].apply(
+        s, conv_out, [n, oh, ow, co, vh, vw, kh, kw, ci_o, kb, ib, vc, ci_i]
+    )
+
+    n, h, w, co = s[last].op.axis
+    co, vc = cfg["tile_co"].apply(s, last, co)
+    oh, vh = cfg["tile_oh"].apply(s, last, h)
+    ow, vw = cfg["tile_ow"].apply(s, last, w)
+    s[last].reorder(n, oh, ow, co, vh, vw, vc)
+    s[last].vectorize(vc)
+    if last != output:
+        s[output].compute_inline()
+
+    s[conv_out].compute_at(s[last], co)
+    s[last].parallel(oh)
+    return s
+
+
+@autotvm.register_topi_schedule("bitserial_conv2d_nhwc.arm_cpu")
+def schedule_bitserial_conv2d_nhwc_no_intrinsics(cfg, outs):
+    """Arm cpu schedule for bitserial conv2d without the arm32 intrinsics"""
+    s = te.create_schedule([x.op for x in outs])
+
+    def _callback(op):
+        if "spatial_bitserial_conv_nhwc" in op.tag:
+            output = op.output(0)
+            conv_out = op.input_tensors[0]
+            kernel_vec = conv_out.op.input_tensors[0]
+            data_vec = conv_out.op.input_tensors[1]
+            data_q = data_vec.op.input_tensors[0]
+            data = data_q.op.input_tensors[0]
+            data_pad = None
+            if isinstance(data_q.op, te.tensor.ComputeOp) and "pad" in data_q.op.tag:
+                data_pad = data_q
+                data_q = data
+                data = data.op.input_tensors[0]
+            unipolar = "unipolar" in conv_out.op.tag
+            _schedule_spatial_conv2d_nhwc_no_intrinsics(
+                cfg, s, data_pad, data_vec, kernel_vec, conv_out, output, outs[0], unipolar
+            )
+
+    traverse_inline(s, outs[0].op, _callback)
+    return s
+
+
 @bitserial_conv2d_legalize.register("arm_cpu")
 def _bitserial_conv2d_legalize(attrs, inputs, arg_types):
     """Legalizes Bitserial Conv2D op.
