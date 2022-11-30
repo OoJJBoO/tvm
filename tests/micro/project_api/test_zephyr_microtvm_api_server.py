@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -16,20 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 
-set -euxo pipefail
+import os
 
-BUILD_DIR=$1
-mkdir -p "$BUILD_DIR"
-cd "$BUILD_DIR"
-cp ../cmake/config.cmake .
+import tvm
 
-echo set\(USE_SORT ON\) >> config.cmake
-echo set\(USE_LLVM llvm-config\) >> config.cmake
-echo set\(USE_RELAY_DEBUG ON\) >> config.cmake
-echo set\(CMAKE_BUILD_TYPE=Debug\) >> config.cmake
-echo set\(CMAKE_CXX_FLAGS \"-Werror -Wp,-D_GLIBCXX_ASSERTIONS\"\) >> config.cmake
-echo set\(HIDE_PRIVATE_SYMBOLS ON\) >> config.cmake
-echo set\(USE_LIBBACKTRACE ON\) >> config.cmake
-echo set\(USE_CCACHE OFF\) >> config.cmake
-echo set\(SUMMARIZE ON\) >> config.cmake
-echo set\(USE_MICRO ON\) >> config.cmake
+from .utils import build_project_api
+
+
+@tvm.testing.requires_micro
+def test_option_cmsis_path():
+    """Test project API without CMSIS_PATH environment variable."""
+    cmsis_path = os.environ.get("CMSIS_PATH", None)
+    del os.environ["CMSIS_PATH"]
+    build_project_api("zephyr")
+    os.environ["CMSIS_PATH"] = cmsis_path

@@ -21,7 +21,7 @@ import logging
 # pylint: disable=invalid-name,unused-argument,wildcard-import,unused-wildcard-import
 import re
 
-from tvm import relay, topi
+from tvm import relay, topi, tir
 
 from ....auto_scheduler import is_auto_scheduler_enabled
 from ....meta_schedule import is_meta_schedule_enabled
@@ -579,26 +579,43 @@ def schedule_dense_arm_cpu(attrs, inputs, out_type, target):
             wrap_topi_schedule(topi.arm_cpu.schedule_dense_dsp),
             name="dense_dsp.arm_cpu",
         )
-    elif is_auto_scheduler_enabled() or is_meta_schedule_enabled():
-        logger.warning("dense is not optimized for arm cpu.")
-        strategy.add_implementation(
-            wrap_compute_dense(
-                topi.nn.dense,
-                need_auto_scheduler_layout=is_auto_scheduler_enabled(),
-                need_meta_schedule_layout=is_meta_schedule_enabled(),
-            ),
-            wrap_topi_schedule(topi.generic.schedule_dense),
-            name="dense.generic",
-        )
-    # Since the generic dense is not tuneable, we instead use the x86 variant
-    # if we do not need to use auto-scheduling or mata schedules
     else:
-        strategy.add_implementation(
-        wrap_compute_dense(topi.x86.dense_pack),
-        wrap_topi_schedule(topi.x86.schedule_dense_pack),
-        name="dense_pack.x86",
-        plevel=10,
-    )
+        # For dynamic matrix-vector multiply we use a hand written kernel.
+        if (
+            isinstance(inputs[0].shape[0], (int, tir.IntImm))
+            and inputs[0].shape[0] == 1
+            and (
+                topi.utils.is_dynamic_shape(inputs[0].shape)
+                or topi.utils.is_dynamic_shape(inputs[1].shape)
+            )
+        ):
+            strategy.add_implementation(
+                wrap_compute_dense(topi.x86.dense_dynamic),
+                wrap_topi_schedule(topi.x86.schedule_dense_dynamic),
+                name="dense_dynamic.x86",
+                plevel=20,
+            )
+            return strategy
+        logger.warning("dense is not optimized for arm cpu.")
+        if is_auto_scheduler_enabled() or is_meta_schedule_enabled():
+            strategy.add_implementation(
+                wrap_compute_dense(
+                    topi.nn.dense,
+                    need_auto_scheduler_layout=is_auto_scheduler_enabled(),
+                    need_meta_schedule_layout=is_meta_schedule_enabled(),
+                ),
+                wrap_topi_schedule(topi.generic.schedule_dense),
+                name="dense.generic",
+            )
+        # Since the generic dense is not tuneable, we instead use the x86 variant
+        # if we do not need to use auto-scheduling or mata schedules
+        else:
+            strategy.add_implementation(
+            wrap_compute_dense(topi.x86.dense_pack),
+            wrap_topi_schedule(topi.x86.schedule_dense_pack),
+            name="dense_pack.x86",
+            plevel=10,
+        )
     return strategy
 
 

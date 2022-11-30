@@ -45,20 +45,20 @@
 // 'python3 jenkins/generate.py'
 // Note: This timestamp is here to ensure that updates to the Jenkinsfile are
 // always rebased on main before merging:
-// Generated at 2022-11-19T01:24:31.191996
+// Generated at 2022-11-22T15:04:11.262643
 
 import org.jenkinsci.plugins.pipeline.modeldefinition.Utils
 // NOTE: these lines are scanned by docker/dev_common.sh. Please update the regex as needed. -->
-ci_lint = 'tlcpack/ci-lint:20221025-182121-e41d0ed6e'
-ci_gpu = 'tlcpack/ci-gpu:20221025-182121-e41d0ed6e'
-ci_cpu = 'tlcpack/ci-cpu:20221025-182121-e41d0ed6e'
-ci_minimal = 'tlcpack/ci-minimal:20221025-182121-e41d0ed6e'
-ci_wasm = 'tlcpack/ci-wasm:20221025-182121-e41d0ed6e'
-ci_i386 = 'tlcpack/ci-i386:20221025-182121-e41d0ed6e'
-ci_cortexm = 'tlcpack/ci-cortexm:20221025-182121-e41d0ed6e'
-ci_arm = 'tlcpack/ci-arm:20221025-182121-e41d0ed6e'
+ci_lint = 'tlcpack/ci-lint:20221128-070141-ae4fd7df7'
+ci_gpu = 'tlcpack/ci-gpu:20221128-070141-ae4fd7df7'
+ci_cpu = 'tlcpack/ci-cpu:20221128-070141-ae4fd7df7'
+ci_minimal = 'tlcpack/ci-minimal:20221128-070141-ae4fd7df7'
+ci_wasm = 'tlcpack/ci-wasm:20221128-070141-ae4fd7df7'
+ci_i386 = 'tlcpack/ci-i386:20221128-070141-ae4fd7df7'
+ci_cortexm = 'tlcpack/ci-cortexm:20221128-070141-ae4fd7df7'
+ci_arm = 'tlcpack/ci-arm:20221128-070141-ae4fd7df7'
 ci_hexagon = 'tlcpack/ci-hexagon:20221025-182121-e41d0ed6e'
-ci_riscv = 'tlcpack/ci-riscv:20221025-182121-e41d0ed6e'
+ci_riscv = 'tlcpack/ci-riscv:20221128-070141-ae4fd7df7'
 // <--- End of regex-scanned config.
 
 // Parameters to allow overriding (in Jenkins UI), the images
@@ -812,9 +812,10 @@ stage('Build') {
             label: 'Create CPU minimal cmake config',
           )
           cmake_build(ci_minimal, 'build', '-j2')
+          make_standalone_crt(ci_minimal, 'build')
           make_cpp_tests(ci_minimal, 'build')
           sh(
-            script: "./${jenkins_scripts_root}/s3.py --action upload --bucket ${s3_bucket} --prefix ${s3_prefix}/cpu-minimal --items build/libtvm.so build/libtvm_runtime.so build/config.cmake build/libtvm_allvisible.so build/cpptest build/build.ninja build/CMakeFiles/rules.ninja",
+            script: "./${jenkins_scripts_root}/s3.py --action upload --bucket ${s3_bucket} --prefix ${s3_prefix}/cpu-minimal --items build/libtvm.so build/libtvm_runtime.so build/config.cmake build/libtvm_allvisible.so build/crttest build/cpptest build/build.ninja build/CMakeFiles/rules.ninja build/standalone_crt build/build.ninja",
             label: 'Upload artifacts to S3',
           )
           }
@@ -3257,6 +3258,7 @@ def run_unittest_minimal() {
             )
 
               cpp_unittest(ci_minimal)
+              micro_cpp_unittest(ci_minimal)
               python_unittest(ci_minimal)
             })
           } finally {
