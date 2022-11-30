@@ -15,20 +15,19 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=invalid-name, invalid-name, too-many-locals, too-many-arguments
-"""Schedule for bitserial dense operator."""
+"""Schedule for bitserial dense operator without the custom popcount kernel."""
 from __future__ import absolute_import as _abs
 import tvm
 from tvm import te
 from tvm import autotvm
 from tvm.topi.utils import get_const_tuple
 from .. import tag
-from .bitserial_conv2d import _intrin_popcount
 from ..nn.pad import pad
 from ..nn.bitserial_util import bitpack, binary_op_multiplier
 
 
-@autotvm.register_topi_compute("bitserial_dense.arm_cpu")
-def bitserial_dense(cfg, data, weight, data_bits, weight_bits, pack_dtype, out_dtype, unipolar):
+@autotvm.register_topi_compute("bitserial_dense_no_intrinsics.arm_cpu")
+def bitserial_dense_no_intrinsics(cfg, data, weight, data_bits, weight_bits, pack_dtype, out_dtype, unipolar):
     """The default implementation of bitserial dense in topi.
 
     Parameters
@@ -138,9 +137,9 @@ def bitserial_dense(cfg, data, weight, data_bits, weight_bits, pack_dtype, out_d
     return matmul
 
 
-@autotvm.register_topi_schedule("bitserial_dense.arm_cpu")
-def schedule_bitserial_dense(cfg, outs):
-    """Schedule for binary_dense.
+@autotvm.register_topi_schedule("bitserial_dense_no_intrinsics.arm_cpu")
+def schedule_bitserial_dense_no_intrinsics(cfg, outs):
+    """Schedule for binary_dense that does not use the arm32 intrinsic popcount.
 
     Parameters
     ----------
@@ -175,13 +174,6 @@ def schedule_bitserial_dense(cfg, outs):
 
         fused = s[output].fuse(xo, yo)
         s[output].parallel(fused)
-
-        nfactor = cfg["tile_y"].size[-1]
-        kfactor = cfg["tile_k"].size[-1]
-        if nfactor % 8 == 0:
-            pc = _intrin_popcount(nfactor, kfactor, WB, DB, unipolar)
-            s[output].tensorize(wb, pc)
-
         return s
 
     def traverse(op):

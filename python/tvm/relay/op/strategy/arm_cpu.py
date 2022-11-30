@@ -529,7 +529,7 @@ def bitserial_conv2d_strategy_arm_cpu(attrs, inputs, out_type, target):
         # of less instructions than the arm32 codegen.
         if target.features.is_aarch64:
             strategy.add_implementation(
-                wrap_compute_bitserial_conv2d(topi.arm_cpu.bitserial_conv2d_nhwc),
+                wrap_compute_bitserial_conv2d(topi.arm_cpu.bitserial_conv2d_nhwc_no_intrinsics),
                 wrap_topi_schedule(topi.arm_cpu.schedule_bitserial_conv2d_nhwc_no_intrinsics),
                 name="bitserial_conv2d_nhwc.arm_cpu",
             )
@@ -554,7 +554,7 @@ def schedule_bitserial_dense_arm_cpu(attrs, inputs, out_type, target):
     # instructions than the arm32 codegen.
     if target.is_aarch64:
         strategy.add_implementation(
-            wrap_compute_bitserial_dense(topi.arm_cpu.bitserial_dense),
+            wrap_compute_bitserial_dense(topi.arm_cpu.bitserial_dense_no_intrinsics),
             wrap_topi_schedule(topi.arm_cpu.schedule_bitserial_dense_no_intrinsics),
             name="bitserial_dense.arm_cpu",
         )
