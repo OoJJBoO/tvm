@@ -47,7 +47,7 @@ def verify_bitserial_conv2d_nhwc_not_intrinsics(
     input_type = "uint32"
     out_dtype = "int16"
 
-    device = "llvm -device=arm_cpu -model=bmc2711 -mtriple=aarch64-linux-gnu -mattr=+neon"
+    device = "llvm -model=bcm2711 -mtriple=aarch64-linux-gnu -mattr=+neon -mcpu=cortex-a72"
     with tvm.target.Target(device):
         A = te.placeholder((batch, in_height, in_width, in_channel), dtype=input_type, name="A")
         W = te.placeholder((kernel, kernel, in_channel, num_filter), dtype=input_type, name="W")
