@@ -526,7 +526,7 @@ def bitserial_conv2d_strategy_arm_cpu(attrs, inputs, out_type, target):
         # Since the intrinsic popcount uses arm32 specific instructions, we can 
         # not use it on aarch64. This should not affect performance much, since
         # LLVM produces more efficient aarch64 popcount assembly code consisting
-        # of less instructions than the arm32 codegen.
+        # of less instructions than the arm32 codegen did.
         if target.features.is_aarch64:
             strategy.add_implementation(
                 wrap_compute_bitserial_conv2d(topi.arm_cpu.bitserial_conv2d_nhwc_no_intrinsics),
@@ -551,7 +551,7 @@ def schedule_bitserial_dense_arm_cpu(attrs, inputs, out_type, target):
     # Since the intrinsic popcount uses arm32 specific instructions, we can not
     # use it on aarch64. This should not affect performance much, since LLVM
     # produces more efficient aarch64 popcount assembly code consisting of less
-    # instructions than the arm32 codegen.
+    # instructions than the arm32 codegen did.
     if target.is_aarch64:
         strategy.add_implementation(
             wrap_compute_bitserial_dense(topi.arm_cpu.bitserial_dense_no_intrinsics),
