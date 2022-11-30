@@ -31,7 +31,7 @@ def generate_quantized_np(shape, bits, out_dtype):
 
 
 # Verify that certain special instructions from the tensorize pass exist
-def verify_bitserial_conv2d_nhwc(
+def verify_bitserial_conv2d_nhwc_not_intrinsics(
     batch,
     in_size,
     in_channel,
@@ -57,7 +57,7 @@ def verify_bitserial_conv2d_nhwc(
         )
         if use_relu:
             B = topi.nn.relu(B)
-        s = topi.arm_cpu.schedule_bitserial_conv2d_nhwc([B])
+        s = topi.arm_cpu.schedule_bitserial_conv2d_nhwc_no_intrinsics([B])
 
     func = tvm.build(s, [A, W, B], device)
 
@@ -99,13 +99,13 @@ def test_bitserial_conv2d():
     stride = 1
     pad = 1
 
-    verify_bitserial_conv2d_nhwc(1, in_size, ic, oc, k, stride, pad, 1, 1, False)
-    verify_bitserial_conv2d_nhwc(1, in_size, ic, oc, k, stride, pad, 2, 1, False)
+    verify_bitserial_conv2d_nhwc_not_intrinsics(1, in_size, ic, oc, k, stride, pad, 1, 1, False)
+    verify_bitserial_conv2d_nhwc_not_intrinsics(1, in_size, ic, oc, k, stride, pad, 2, 1, False)
 
-    verify_bitserial_conv2d_nhwc(1, in_size, ic, oc, k, stride, pad, 1, 1, True)
-    verify_bitserial_conv2d_nhwc(1, in_size, ic, oc, k, stride, pad, 2, 1, True)
+    verify_bitserial_conv2d_nhwc_not_intrinsics(1, in_size, ic, oc, k, stride, pad, 1, 1, True)
+    verify_bitserial_conv2d_nhwc_not_intrinsics(1, in_size, ic, oc, k, stride, pad, 2, 1, True)
 
-    verify_bitserial_conv2d_nhwc(1, in_size, ic, oc, k, stride, pad, 2, 1, True, True)
+    verify_bitserial_conv2d_nhwc_not_intrinsics(1, in_size, ic, oc, k, stride, pad, 2, 1, True, True)
 
 
 if __name__ == "__main__":
