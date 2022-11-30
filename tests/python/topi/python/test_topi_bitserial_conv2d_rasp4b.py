@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import os
+import re
 import numpy as np
 import tvm
 from tvm import te
@@ -47,16 +48,24 @@ def verify_bitserial_conv2d_nhwc_not_intrinsics(
     input_type = "uint32"
     out_dtype = "int16"
 
-    device = "llvm -model=bcm2711 -mtriple=armv8l-linux-gnueabihf -mattr=+neon -mcpu=cortex-a72"
+    device = "llvm -keys=arm_cpu, -device=arm_cpu -model=bcm2711 -mtriple=armv8l-linux-gnueabihf -mattr=+neon -mcpu=cortex-a72"
     with tvm.target.Target(device):
         A = te.placeholder((batch, in_height, in_width, in_channel), dtype=input_type, name="A")
         W = te.placeholder((kernel, kernel, in_channel, num_filter), dtype=input_type, name="W")
-        B = topi.arm_cpu.bitserial_conv2d_nhwc_no_intrinsics(
+        B = topi.arm_cpu.bitserial_conv2d_nhwc(
             A, W, stride, padding, activation_bits, weight_bits, "uint8", out_dtype, unipolar
         )
-        s = topi.arm_cpu.schedule_bitserial_conv2d_nhwc_no_intrinsics([B])
+        s = topi.arm_cpu.schedule_bitserial_conv2d_nhwc([B])
 
     func = tvm.build(s, [A, W, B], device)
+
+    assembly = func.get_source("asm")
+    matches = re.findall("vpadal", assembly)
+    assert len(matches) > 0
+    matches = re.findall("vcnt", assembly)
+    assert len(matches) > 0
+    matches = re.findall("vpadd", assembly)
+    assert len(matches) > 0
 
     dev = tvm.device(device, 0)
     if "arm" not in os.uname()[4]:
