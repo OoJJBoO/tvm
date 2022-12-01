@@ -552,7 +552,7 @@ def schedule_bitserial_dense_arm_cpu(attrs, inputs, out_type, target):
     # use it on aarch64. This should not affect performance much, since LLVM
     # produces more efficient aarch64 popcount assembly code consisting of less
     # instructions than the arm32 codegen did.
-    if target.is_aarch64:
+    if target.features.is_aarch64:
         strategy.add_implementation(
             wrap_compute_bitserial_dense(topi.arm_cpu.bitserial_dense_no_intrinsics),
             wrap_topi_schedule(topi.arm_cpu.schedule_bitserial_dense_no_intrinsics),
