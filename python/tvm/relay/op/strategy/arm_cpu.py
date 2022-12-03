@@ -607,15 +607,21 @@ def schedule_dense_arm_cpu(attrs, inputs, out_type, target):
                 wrap_topi_schedule(topi.generic.schedule_dense),
                 name="dense.generic",
             )
-        # Since the generic dense is not tuneable, we instead use the x86 variant
-        # if we do not need to use auto-scheduling or mata schedules
+        # Since the generic dense is not tuneable, we instead use the x86 
+        # variants if we do not need to use auto-scheduling or mata schedules.
         else:
             strategy.add_implementation(
-            wrap_compute_dense(topi.x86.dense_pack),
-            wrap_topi_schedule(topi.x86.schedule_dense_pack),
-            name="dense_pack.x86",
-            plevel=10,
-        )
+                wrap_compute_dense(topi.x86.dense_nopack),
+                wrap_topi_schedule(topi.x86.schedule_dense_nopack),
+                name="dense_nopack.x86",
+                plevel=5,
+            )
+            strategy.add_implementation(
+                wrap_compute_dense(topi.x86.dense_pack),
+                wrap_topi_schedule(topi.x86.schedule_dense_pack),
+                name="dense_pack.x86",
+                plevel=10,
+            )
     return strategy
 
 
