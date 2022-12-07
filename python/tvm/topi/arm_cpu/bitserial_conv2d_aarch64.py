@@ -247,14 +247,20 @@ def _intrin_popcount_aarch64(m, k_i, w_b, x_b, unipolar):
         args_2 = tvm.tir.const(2, "uint32")
 
         if unipolar:
-            vpadd = "llvm.aarch64.neon.addp.v8i8"
-            vpadalu = "llvm.aarch64.neon.saddlp.v8i16.v16i8"
+            vpadd = "llvm.aarch64.neon.addp"
+            # normally, we would use sadalp here, but for some reason LLVM does
+            # not seem to support that at the moment, so we use saddlp and add 
+            # the vectors manually later.
+            vpadalu = "llvm.aarch64.neon.saddlp"
             full_dtype = "int8x16"
             half_dtype = "int8x8"
             return_dtype = "int16x8"
         else:
-            vpadd = "llvm.aarch64.neon.addp.v8u8"
-            vpadalu = "llvm.aarch64.neon.uaddlp.v8i16.v16i8"
+            vpadd = "llvm.aarch64.neon.addp"
+            # normally, we would use uadalp here, but for some reason LLVM does
+            # not seem to support that at the moment, so we use uaddlp and add
+            # the vectors manually later.
+            vpadalu = "llvm.aarch64.neon.uaddlp"
             full_dtype = "uint8x16"
             half_dtype = "uint8x8"
             return_dtype = "uint16x8"
@@ -296,6 +302,8 @@ def _intrin_popcount_aarch64(m, k_i, w_b, x_b, unipolar):
                         out = tvm.tir.call_llvm_pure_intrin(
                             return_dtype, vpadalu, args_2, shifted_cnts
                         )
+                        # add the previous values since we can not use sadalp
+                        out += zz.vload(0, return_dtype)
                     else:  # ki == 8
                         for i in range(m):
                             w_ = ww.vload([bw, i, 0], "uint8x8").astype(half_dtype)
@@ -316,9 +324,11 @@ def _intrin_popcount_aarch64(m, k_i, w_b, x_b, unipolar):
                             full_dtype, "tir.vectorcombine", cnts2[0], cnts2[1]
                         )
                         shifted_cnts = cnts << tvm.tir.const(bw + bx, pack_dtype)
+                        # add the previous values since we can not use uadalp
                         out = tvm.tir.call_llvm_pure_intrin(
                             return_dtype, vpadalu, args_2, shifted_cnts
                         )
+                        out += zz.vload(0, return_dtype)
                     irb.emit(zz.vstore(0, out))
             return irb.get()
 
