@@ -376,7 +376,13 @@ set(USE_CCACHE AUTO)
 # - /path/to/folder/containing/: Path to folder containing papi.pc.
 set(USE_PAPI OFF)
 
-set(USE_LIKWID ON)
+# Wheter to enable LIKWID support for profiling. To collect hardware counters 
+# while profiling using LIKWID TVM can be launched inside the perfctr wrapper 
+# application.
+# Possible values:
+# - ON: enable LIKWID support. Will search for a global LIKWID installation.
+# - OFF: disable LIKWID support.
+set(USE_LIKWID OFF)
 
 # Whether to use GoogleTest for C++ unit tests. When enabled, the generated
 # build file (e.g. Makefile) will have a target "cpptest".
