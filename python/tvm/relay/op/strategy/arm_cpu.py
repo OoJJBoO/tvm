@@ -614,6 +614,16 @@ def schedule_dense_arm_cpu(attrs, inputs, out_type, target):
                 name="dense_pack.x86",
                 plevel=10,
             )
+            strategy.add_implementation(
+                wrap_compute_dense(
+                    topi.nn.dense,
+                    need_auto_scheduler_layout=is_auto_scheduler_enabled(),
+                    need_meta_schedule_layout=is_meta_schedule_enabled(),
+                ),
+                wrap_topi_schedule(topi.generic.schedule_dense),
+                name="dense.generic",
+                plevel=15,
+            )
     return strategy
 
 
