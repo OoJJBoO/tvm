@@ -354,24 +354,44 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
 
     # Parallelize data packing
     if data_pad != None:
-        data_pack = data_pad.op.input_tensors[-1]
+        data_pad_op_name = data_pad.op.input_tensors[-1].op.tag
+        if data_pad_op_name == "bitpack":
+            data_pack = data_pad.op.input_tensors
+        elif data_pad_op_name == "injective":
+            data_pack = data_pad.op.input_tensors[-1].op.input_tensors
+        else:
+            raise RuntimeError(f"Unexpected operator tag: {data_pad_op_name}")
     else:
-        data_pack = data_vec.op.input_tensors[-1]
-    _, DPO, _, _, DPI = data_pack.shape
-    _, dpo, _, _, dpi = data_pack.op.axis
-    if get_const_int(DPO) >= get_const_int(DPI):
-        s[data_pack].parallel(dpo)
-    else:
-        s[data_pack].parallel(dpi)
+        data_vec_op_name = data_vec.op.input_tensors[-1].op.tag
+        if data_vec_op_name == "bitpack":
+            data_pack = data_vec.op.input_tensors
+        elif data_vec_op_name == "injective":
+            data_pack = data_vec.op.input_tensors[-1].op.input_tensors
+        else:
+            raise RuntimeError(f"Unexpected operator tag: {data_vec_op_name}")
+    for pack in data_pack:
+        _, DPO, _, _, DPI = pack.shape
+        _, dpo, _, _, dpi = pack.op.axis
+        if get_const_int(DPO) >= get_const_int(DPI):
+            s[pack].parallel(dpo)
+        else:
+            s[pack].parallel(dpi)
 
     # Parallelize kernel packing
-    kernel_pack = kernel_vec.op.input_tensors[-1]
-    _, _, _, KPO, KPI = kernel_pack.shape
-    _, _, _, kpo, kpi = kernel_pack.op.axis
-    if get_const_int(KPI) >= get_const_int(KPO):
-        s[kernel_pack].parallel(kpi)
+    kernel_vec_op_name = kernel_vec.op.input_tensors[-1].op.tag
+    if kernel_vec_op_name == "bitpack":
+        kernel_pack = kernel_vec.op.input_tensors
+    elif kernel_vec_op_name == "injective":
+        kernel_pack = kernel_vec.op.input_tensors[-1].op.input_tensors
     else:
-        s[kernel_pack].parallel(kpo)
+        raise RuntimeError(f"Unexpected operator tag: {kernel_vec_op_name}")
+    for pack in kernel_pack:
+        _, _, _, KPO, KPI = pack.shape
+        _, _, _, kpo, kpi = pack.op.axis
+        if get_const_int(KPI) >= get_const_int(KPO):
+            s[pack].parallel(kpi)
+        else:
+            s[pack].parallel(kpo)
 
     VC = cfg["tile_co"].size[-1]
     VH = cfg["tile_oh"].size[-1]

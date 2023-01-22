@@ -163,12 +163,29 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
 
     def _schedule(cfg, s, data_vec, weight_vec, output, unipolar):
 
-        dpo, _, _ = s[data_vec].op.axis
-        s[data_vec].parallel(dpo)
+        # Parallelize data packing
+        data_vec_op_name = data_vec.op.input_tensors[-1].op.tag
+        if data_vec_op_name == "bitpack":
+            data_pack = s[data_vec].op.input_tensors
+        elif data_vec_op_name == "":
+            data_pack = s[data_vec].op.input_tensors[-1].op.input_tensors
+        else:
+            raise RuntimeError(f"Unexpected operator: {data_vec_op_name}")
+        for pack in data_pack:
+            dpo, _, _ = s[pack].op.axis
+            s[pack].parallel(dpo)
 
-        weight_pack = s[weight_vec].op.input_tensors[-1]
-        wpo, _, _ = weight_pack.op.axis
-        s[weight_pack].parallel(wpo)
+        # Parallelize weight packing
+        weight_vec_op_name = weight_vec.op.input_tensors[-1].op.tag
+        if  weight_vec_op_name == "bitpack":
+            weight_pack = s[weight_vec].op.input_tensors
+        elif weight_vec_op_name == "injective":
+            weight_pack = s[weight_vec].op.input_tensors[-1].op.input_tensors
+        else:
+            raise RuntimeError(f"Unexpected operator: {weight_vec_op_name}")
+        for pack in weight_pack:
+            wpo, _, _ = pack.op.axis
+            s[pack].parallel(wpo)
 
         z, k, _, y, x = s[weight_vec].op.axis
         s[weight_vec].parallel(z)
