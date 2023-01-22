@@ -350,6 +350,24 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
     KB = get_const_int(KB)
     IB = get_const_int(IB)
 
+    # Parallelize data packing
+    data_pack = data_pad.op.input_tensors[-1]
+    _, DPO, _, _, DPI = data_pack.shape
+    _, dpo, _, _, dpi = data_pack.op.axis
+    if get_const_int(DPO) >= get_const_int(DPI):
+        s[data_pack].parallel(dpo)
+    else:
+        s[data_pack].parallel(dpi)
+
+    # Parallelize kernel packing
+    kernel_pack = kernel_vec.op.input_tensors[-1]
+    _, _, _, KPO, KPI = kernel_pack.shape
+    _, _, _, kpo, kpi = kernel_pack.op.axis
+    if get_const_int(KPI) >= get_const_int(KPO):
+        s[kernel_pack].parallel(kpi)
+    else:
+        s[kernel_pack].parallel(kpo)
+
     VC = cfg["tile_co"].size[-1]
     VH = cfg["tile_oh"].size[-1]
     VW = cfg["tile_ow"].size[-1]

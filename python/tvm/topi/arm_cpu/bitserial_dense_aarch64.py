@@ -26,6 +26,8 @@ from ..nn.pad import pad
 from ..nn.bitserial_util import bitpack, binary_op_multiplier
 from .bitserial_conv2d_aarch64 import _intrin_popcount_aarch64
 
+import logging
+
 
 @autotvm.register_topi_compute("bitserial_dense_aarch64.arm_cpu")
 def bitserial_dense_aarch64(cfg, data, weight, data_bits, weight_bits, pack_dtype, out_dtype, unipolar):
@@ -160,6 +162,13 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
     s = te.create_schedule([x.op for x in outs])
 
     def _schedule(cfg, s, data_vec, weight_vec, output, unipolar):
+
+        dpo, _, _ = s[data_vec].op.axis
+        s[data_vec].parallel(dpo)
+
+        weight_pack = s[weight_vec].op.input_tensors[-1]
+        wpo, _, _ = weight_pack.op.axis
+        s[weight_pack].parallel(wpo)
 
         z, k, _, y, x = s[weight_vec].op.axis
         s[weight_vec].parallel(z)
