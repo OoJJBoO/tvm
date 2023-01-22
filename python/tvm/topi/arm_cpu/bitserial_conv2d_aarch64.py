@@ -26,6 +26,8 @@ from ..nn.utils import get_pad_tuple
 from ..utils import get_const_int, get_const_tuple, traverse_inline
 from .bitserial_conv2d import _kernel_vec_spatial_pack_nhwc
 
+import logging
+
 
 @autotvm.register_topi_compute("bitserial_conv2d_nhwc_aarch64.arm_cpu")
 def bitserial_conv2d_nhwc_aarch64(
@@ -351,7 +353,10 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
     IB = get_const_int(IB)
 
     # Parallelize data packing
-    data_pack = data_pad.op.input_tensors[-1]
+    if data_pad != None:
+        data_pack = data_pad.op.input_tensors[-1]
+    else:
+        data_pack = data_vec.op.input_tensors[-1]
     _, DPO, _, _, DPI = data_pack.shape
     _, dpo, _, _, dpi = data_pack.op.axis
     if get_const_int(DPO) >= get_const_int(DPI):
