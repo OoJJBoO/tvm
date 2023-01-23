@@ -370,12 +370,8 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
         else:
             raise RuntimeError(f"Unexpected operator tag: {data_vec_op_name}")
     for pack in data_pack:
-        _, DPO, _, _, DPI = pack.shape
-        _, dpo, _, _, dpi = pack.op.axis
-        if get_const_int(DPO) >= get_const_int(DPI):
-            s[pack].parallel(dpo)
-        else:
-            s[pack].parallel(dpi)
+        _, dpo, _, _, _ = pack.op.axis
+        s[pack].parallel(dpo)
 
     # Parallelize kernel packing
     kernel_vec_op_name = kernel_vec.op.input_tensors[-1].op.tag
@@ -386,12 +382,8 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
     else:
         raise RuntimeError(f"Unexpected operator tag: {kernel_vec_op_name}")
     for pack in kernel_pack:
-        _, _, _, KPO, KPI = pack.shape
-        _, _, _, kpo, kpi = pack.op.axis
-        if get_const_int(KPI) >= get_const_int(KPO):
-            s[pack].parallel(kpi)
-        else:
-            s[pack].parallel(kpo)
+        _, _, _, kpo, _ = pack.op.axis
+        s[pack].parallel(kpo)
 
     VC = cfg["tile_co"].size[-1]
     VH = cfg["tile_oh"].size[-1]
@@ -438,6 +430,13 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
 
     s[conv_out].compute_at(s[last], co)
     s[last].parallel(oh)
+    
+    # Parallelize outer channel axis if h was not split to ensure 
+    # parallelization of convolution
+    _, H, _, _ = last.shape
+    if VH == H:
+        s[last].parallel(co)
+
     return s
 
 
