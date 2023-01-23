@@ -144,7 +144,7 @@ def bitserial_dense_aarch64(cfg, data, weight, data_bits, weight_bits, pack_dtyp
 @autotvm.register_topi_schedule("bitserial_dense_aarch64.arm_cpu")
 def schedule_bitserial_dense_aarch64(cfg, outs):
     """
-    Schedule for binary_dense that does use the intrinsic popcount updated 
+    Schedule for binary_dense that does use the intrinsic popcount updated
     for aarch64.
 
     Parameters

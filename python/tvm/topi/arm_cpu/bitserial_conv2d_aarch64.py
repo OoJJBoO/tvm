@@ -430,8 +430,8 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
 
     s[conv_out].compute_at(s[last], co)
     s[last].parallel(oh)
-    
-    # Parallelize outer channel axis if h was not split to ensure 
+
+    # Parallelize outer channel axis if h was not split to ensure
     # parallelization of convolution
     _, H, _, _ = last.shape
     if VH == H:
