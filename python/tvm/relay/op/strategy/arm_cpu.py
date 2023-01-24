@@ -589,40 +589,27 @@ def schedule_dense_arm_cpu(attrs, inputs, out_type, target):
             )
             return strategy
         logger.warning("dense is not optimized for arm cpu.")
-        if is_auto_scheduler_enabled() or is_meta_schedule_enabled():
-            strategy.add_implementation(
-                wrap_compute_dense(
-                    topi.nn.dense,
-                    need_auto_scheduler_layout=is_auto_scheduler_enabled(),
-                    need_meta_schedule_layout=is_meta_schedule_enabled(),
-                ),
-                wrap_topi_schedule(topi.generic.schedule_dense),
-                name="dense.generic",
-            )
+        strategy.add_implementation(
+            wrap_compute_dense(
+                topi.nn.dense,
+                need_auto_scheduler_layout=is_auto_scheduler_enabled(),
+                need_meta_schedule_layout=is_meta_schedule_enabled(),
+            ),
+            wrap_topi_schedule(topi.generic.schedule_dense),
+            name="dense.generic",
+        )
         # Since the generic dense is not tuneable, we instead use the x86 
         # variants if we do not need to use auto-scheduling or mata schedules.
-        else:
+        if not (is_auto_scheduler_enabled() or is_meta_schedule_enabled()):
             strategy.add_implementation(
                 wrap_compute_dense(topi.x86.dense_nopack),
                 wrap_topi_schedule(topi.x86.schedule_dense_nopack),
                 name="dense_nopack.x86",
-                plevel=5,
             )
             strategy.add_implementation(
                 wrap_compute_dense(topi.x86.dense_pack),
                 wrap_topi_schedule(topi.x86.schedule_dense_pack),
                 name="dense_pack.x86",
-                plevel=10,
-            )
-            strategy.add_implementation(
-                wrap_compute_dense(
-                    topi.nn.dense,
-                    need_auto_scheduler_layout=is_auto_scheduler_enabled(),
-                    need_meta_schedule_layout=is_meta_schedule_enabled(),
-                ),
-                wrap_topi_schedule(topi.generic.schedule_dense),
-                name="dense.generic",
-                plevel=15,
             )
     return strategy
 

@@ -163,52 +163,33 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
 
     def _schedule(cfg, s, data_vec, weight_vec, output, unipolar):
 
-        # Parallelize data packing
-        data_vec_op_tag = data_vec.op.tag
-        if data_vec_op_tag == "bitpack":
-            data_pack = [data_vec]
-            dco = None
-        elif data_vec_op_tag == "injective":
-            # This happens for ab > 1, since then we need to concatenate values
-            # after packing
-            data_pack = data_vec.op.input_tensors
-            dco, _, _ = data_vec.op.axis
-            s[data_vec].parallel(dco)
-        else:
-            raise RuntimeError(f"Unexpected operator: {data_vec_op_tag}")
-        for pack in data_pack:
-            if dco is None:
-                # Parallelize bit-packing only
-                dpo, _, _ = s[pack].op.axis
-                s[pack].parallel(dpo)
-            else:
-                # Concatenate and bit-pack in the same parallel loop
-                s[pack].compute_at(s[data_vec], dco)
+        z, k, _, y, x = s[weight_vec].op.axis
 
         # Parallelize weight packing
         weight_vec_inner = weight_vec.op.input_tensors[-1]
         weight_vec_op_tag = weight_vec_inner.op.tag
-        if  weight_vec_op_tag == "bitpack":
-            weight_pack = s[weight_vec].op.input_tensors
-            wco = None
-        elif weight_vec_op_tag == "injective":
+        if weight_vec_op_tag == "injective":
             # This happens for wb > 1, since then we need to concatenate values
             # after packing
             weight_pack = weight_vec_inner.op.input_tensors
             wco, _, _ = weight_vec_inner.op.axis
-            s[weight_vec_inner].parallel(wco)
-        else:
-            raise RuntimeError(f"Unexpected operator: {weight_vec_op_tag}")
-        for pack in weight_pack:
-            if wco is None:
-                # Parallelize bit-packing only
-                wpo, _, _ = pack.op.axis
-                s[pack].parallel(wpo)
-            else:
-                # Concatenate and bit-pack in the same parallel loop
+            for pack in weight_pack:
+                # Compute bit-packing and concatenate in same outer loop
                 s[pack].compute_at(s[weight_vec_inner], wco)
+        s[weight_vec_inner].compute_at(s[weight_vec], z)
 
-        z, k, _, y, x = s[weight_vec].op.axis
+        # Parallelize data packing
+        data_vec_op_tag = data_vec.op.tag
+        dco, _, _ = data_vec.op.axis
+        if data_vec_op_tag == "injective":
+            # This happens for ab > 1, since then we need to concatenate values
+            # after packing
+            data_pack = data_vec.op.input_tensors
+            for pack in data_pack:
+                # Compute bit-packing and concatenate in same outer loop
+                s[pack].compute_at(s[data_vec], dco)
+        s[data_vec].parallel(dco)
+
         s[weight_vec].parallel(z)
         s[weight_vec].vectorize(x)
 
