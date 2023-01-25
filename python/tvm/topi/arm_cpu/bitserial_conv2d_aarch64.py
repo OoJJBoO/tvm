@@ -352,39 +352,6 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
     KB = get_const_int(KB)
     IB = get_const_int(IB)
 
-    # Parallelize data packing
-    if data_pad != None:
-        data_pad_op_name = data_pad.op.input_tensors[-1].op.tag
-        if data_pad_op_name == "bitpack":
-            data_pack = data_pad.op.input_tensors
-        elif data_pad_op_name == "injective":
-            data_pack = data_pad.op.input_tensors[-1].op.input_tensors
-        else:
-            raise RuntimeError(f"Unexpected operator tag: {data_pad_op_name}")
-    else:
-        data_vec_op_name = data_vec.op.input_tensors[-1].op.tag
-        if data_vec_op_name == "bitpack":
-            data_pack = data_vec.op.input_tensors
-        elif data_vec_op_name == "injective":
-            data_pack = data_vec.op.input_tensors[-1].op.input_tensors
-        else:
-            raise RuntimeError(f"Unexpected operator tag: {data_vec_op_name}")
-    for pack in data_pack:
-        _, dpo, _, _, _ = pack.op.axis
-        s[pack].parallel(dpo)
-
-    # Parallelize kernel packing
-    kernel_vec_op_name = kernel_vec.op.input_tensors[-1].op.tag
-    if kernel_vec_op_name == "bitpack":
-        kernel_pack = kernel_vec.op.input_tensors
-    elif kernel_vec_op_name == "injective":
-        kernel_pack = kernel_vec.op.input_tensors[-1].op.input_tensors
-    else:
-        raise RuntimeError(f"Unexpected operator tag: {kernel_vec_op_name}")
-    for pack in kernel_pack:
-        _, _, _, kpo, _ = pack.op.axis
-        s[pack].parallel(kpo)
-
     VC = cfg["tile_co"].size[-1]
     VH = cfg["tile_oh"].size[-1]
     VW = cfg["tile_ow"].size[-1]
@@ -398,11 +365,40 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
     oh, ih = cfg["tile_ah"].apply(s, data_vec, h)
     s[data_vec].parallel(oh)
 
+    # Parallelize data packing
+    if data_pad != None:
+        data_vec_inner = data_pad.op.input_tensors[-1]
+    else:
+        data_vec_inner = data_vec.op.input_tensors[-1]
+    data_vec_inner_op_tag = data_vec_inner.op.tag
+    dco, _, _, _, _ = data_vec_inner.op.axis
+    if data_vec_inner_op_tag == "injective":
+        # This happens for ab > 1, since then we need to concatenate values
+        # after packing
+        data_pack = data_vec_inner.op.input_tensors
+        for pack in data_pack:
+            # Compute bit-packing and concatenate in same outer loop
+            s[pack].compute_at(s[data_vec_inner], dco)
+    s[data_vec_inner].compute_at(s[data_vec], oh)
+
     #### Schedule kernel packing
     co, _, _, _, _, _ = s[kernel_vec].op.axis
     cfg.define_split("tile_bco", cfg.axis(co), num_outputs=2, max_factor=32)
     oco, ico = cfg["tile_bco"].apply(s, kernel_vec, co)
     s[kernel_vec].parallel(oco)
+
+    # Parallelize kernel packing
+    kernel_vec_inner = kernel_vec.op.input_tensors[-1]
+    kernel_vec_inner_op_tag = kernel_vec_inner.op.tag
+    kco, _, _, _, _ = kernel_vec_inner.op.axis
+    if kernel_vec_inner_op_tag == "injective":
+        # This happens for wb > 1, since then we need to concatenate values
+        # after packing
+        kernel_pack = kernel_vec_inner.op.input_tensors
+        for pack in kernel_pack:
+            # Compute bit-packing and concatenate in same outer loop
+            s[pack].compute_at(s[kernel_vec_inner], kco)
+    s[kernel_vec_inner].compute_at(s[kernel_vec], oco)
 
     ##### Schedule Convolution
     n, oh, ow, co, vh, vw, vc = s[conv_out].op.axis
