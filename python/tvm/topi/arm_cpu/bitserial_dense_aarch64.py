@@ -178,7 +178,6 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
                 s[pack].compute_at(s[weight_vec_inner], wco)
                 s[pack].vectorize(pack.op.axis[-1])
         s[weight_vec_inner].compute_at(s[weight_vec], z)
-        s[weight_vec_inner].vectorize(wci)
 
         # Parallelize data packing
         data_vec_op_tag = data_vec.op.tag
@@ -192,7 +191,6 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
                 s[pack].compute_at(s[data_vec], dco)
                 s[pack].vectorize(pack.op.axis[-1])
         s[data_vec].parallel(dco)
-        s[data_vec].vectorize(dci)
 
         s[weight_vec].parallel(z)
         s[weight_vec].vectorize(x)
