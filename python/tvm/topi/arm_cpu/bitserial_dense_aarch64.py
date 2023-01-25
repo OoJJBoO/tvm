@@ -168,19 +168,21 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
         # Parallelize weight packing
         weight_vec_inner = weight_vec.op.input_tensors[-1]
         weight_vec_op_tag = weight_vec_inner.op.tag
+        wco, _, wci = weight_vec_inner.op.axis
         if weight_vec_op_tag == "injective":
             # This happens for wb > 1, since then we need to concatenate values
             # after packing
             weight_pack = weight_vec_inner.op.input_tensors
-            wco, _, _ = weight_vec_inner.op.axis
             for pack in weight_pack:
                 # Compute bit-packing and concatenate in same outer loop
                 s[pack].compute_at(s[weight_vec_inner], wco)
+                s[pack].vectorize(pack.op.axis[-1])
         s[weight_vec_inner].compute_at(s[weight_vec], z)
-        
-        ## Parallelize data packing
+        s[weight_vec_inner].vectorize(wci)
+
+        # Parallelize data packing
         data_vec_op_tag = data_vec.op.tag
-        dco, _, _ = data_vec.op.axis
+        dco, _, dci = data_vec.op.axis
         if data_vec_op_tag == "injective":
             # This happens for ab > 1, since then we need to concatenate values
             # after packing
@@ -188,6 +190,9 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
             for pack in data_pack:
                 # Compute bit-packing and concatenate in same outer loop
                 s[pack].compute_at(s[data_vec], dco)
+                s[pack].vectorize(pack.op.axis[-1])
+        s[data_vec].parallel(dco)
+        s[data_vec].vectorize(dci)
 
         s[weight_vec].parallel(z)
         s[weight_vec].vectorize(x)
@@ -201,10 +206,6 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
         xo, xi = cfg["tile_x"].apply(s, output, x)
         ko, ki = cfg["tile_k"].apply(s, output, k)
 
-        # Move bit-packing inside of fused outer loop
-        s[weight_vec].compute_at(s[output], xo)
-        s[data_vec].compute_at(s[output], xo)
-        
         cfg["reorder_0"].apply(s, output, [yo, xo, ko, xi, wb, db, yi, ki])
 
         fused = s[output].fuse(xo, yo)
