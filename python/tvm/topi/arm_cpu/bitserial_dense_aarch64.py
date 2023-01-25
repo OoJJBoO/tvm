@@ -165,39 +165,12 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
 
         z, k, _, y, x = s[weight_vec].op.axis
 
-        # Parallelize weight packing
-        weight_vec_inner = weight_vec.op.input_tensors[-1]
-        weight_vec_op_tag = weight_vec_inner.op.tag
-        wco, _, wci = weight_vec_inner.op.axis
-        if weight_vec_op_tag == "injective":
-            # This happens for wb > 1, since then we need to concatenate values
-            # after packing
-            weight_pack = weight_vec_inner.op.input_tensors
-            for pack in weight_pack:
-                # Compute bit-packing and concatenate in same outer loop
-                s[pack].compute_at(s[weight_vec_inner], wco)
-                s[pack].vectorize(pack.op.axis[-1])
-        s[weight_vec_inner].compute_at(s[weight_vec], z)
-
-        # Parallelize data packing
-        data_vec_op_tag = data_vec.op.tag
-        dco, _, dci = data_vec.op.axis
-        if data_vec_op_tag == "injective":
-            # This happens for ab > 1, since then we need to concatenate values
-            # after packing
-            data_pack = data_vec.op.input_tensors
-            for pack in data_pack:
-                # Compute bit-packing and concatenate in same outer loop
-                s[pack].compute_at(s[data_vec], dco)
-                s[pack].vectorize(pack.op.axis[-1])
-        s[data_vec].parallel(dco)
-
         s[weight_vec].parallel(z)
         s[weight_vec].vectorize(x)
 
         x, y = s[output].op.axis
         wb, db, k = s[output].op.reduce_axis
-        _, DB, _ = get_const_tuple(data_vec.shape)
+        DD, DB, _ = get_const_tuple(data_vec.shape)
         _, _, WB, _, _ = get_const_tuple(weight_vec.shape)
 
         yo, yi = cfg["tile_y"].apply(s, output, y)
@@ -208,6 +181,39 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
 
         fused = s[output].fuse(xo, yo)
         s[output].parallel(fused)
+
+        # Parallelize weight packing
+        weight_vec_inner = weight_vec.op.input_tensors[-1]
+        weight_vec_op_tag = weight_vec_inner.op.tag
+        WD, _, _ = get_const_tuple(weight_vec_inner.shape)
+        wco, _, _ = weight_vec_inner.op.axis
+        if weight_vec_op_tag == "injective":
+            # This happens for wb > 1, since then we need to concatenate values
+            # after packing
+            weight_pack = weight_vec_inner.op.input_tensors
+            for pack in weight_pack:
+                # Compute bit-packing and concatenate in same outer loop
+                s[pack].compute_at(s[weight_vec_inner], wco)
+        s[weight_vec_inner].compute_at(s[weight_vec], z)
+
+        # Parallelize data packing
+        data_vec_op_tag = data_vec.op.tag
+        dco, _, _ = data_vec.op.axis
+        if data_vec_op_tag == "injective":
+            # This happens for ab > 1, since then we need to concatenate values
+            # after packing
+            data_pack = data_vec.op.input_tensors
+            for pack in data_pack:
+                # Compute bit-packing and concatenate in same outer loop
+                s[pack].compute_at(s[data_vec], dco)
+        s[data_vec].parallel(dco)
+
+        # For small dimensions, compute the packing inside the outer fused loop
+        # to better hide multi-threading costs
+        if WD <= 64:
+            s[weight_vec].compute_at(s[output], fused)
+        if DD <= 64:
+            s[data_vec].compute_at(s[output], fused)
 
         nfactor = cfg["tile_y"].size[-1]
         kfactor = cfg["tile_k"].size[-1]
