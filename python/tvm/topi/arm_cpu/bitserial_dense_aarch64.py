@@ -209,10 +209,12 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
         s[data_vec].parallel(dco)
 
         # For small dimensions, compute the packing inside the outer fused loop
-        # to better hide multi-threading costs
-        if WD <= 64:
+        # to better hide multi-threading costs. For bit-widths larger than one,
+        # this is not necessary, since in this case there should be enough work
+        # to perform already (tested on a Raspberry Pi 4 Model B)
+        if WD <= 64 and WB == 1:
             s[weight_vec].compute_at(s[output], fused)
-        if DD <= 64:
+        if DD <= 64 and DB == 1:
             s[data_vec].compute_at(s[output], fused)
 
         nfactor = cfg["tile_y"].size[-1]
