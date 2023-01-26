@@ -364,14 +364,7 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
     cfg.define_split("tile_ah", cfg.axis(h), num_outputs=2, max_factor=32)
     DH = cfg["tile_ah"].size[-1]
     oh, ih = cfg["tile_ah"].apply(s, data_vec, h)
-    _, H, _, _, _, _, _ = data_vec.shape
-
-    # Parallelize outer channel axis if h is not split to try to ensure
-    # parallelization of outer data vector computation
-    if DH == H:
-        s[data_vec].parallel(d)
-    else:
-        s[data_vec].parallel(oh)
+    s[data_vec].parallel(oh)
 
     # Parallelize data packing
     if data_pad != None:
