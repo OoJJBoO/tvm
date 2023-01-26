@@ -195,6 +195,11 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
                 # Compute bit-packing and concatenate in same outer loop
                 s[pack].compute_at(s[weight_vec_inner], wco)
         s[weight_vec_inner].compute_at(s[weight_vec], z)
+        # For small dimensions, it proved to be faster to move the bit-packing
+        # computation to the outer fused loop
+        # (Tested on a Raspberry Pi 4 Model B)
+        if WD <= 64:
+            s[weight_vec].compute_at(s[output], fused)
 
         # Parallelize data packing
         data_vec_op_tag = data_vec.op.tag
@@ -206,15 +211,12 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
             for pack in data_pack:
                 # Compute bit-packing and concatenate in same outer loop
                 s[pack].compute_at(s[data_vec], dco)
-        s[data_vec].parallel(dco)
-
-        # For small dimensions, compute the packing inside the outer fused loop
-        # to better hide multi-threading costs. For bit-widths larger than one,
-        # this is not necessary, since in this case there should be enough work
-        # to perform already (tested on a Raspberry Pi 4 Model B)
-        if WD <= 64 and WB == 1:
-            s[weight_vec].compute_at(s[output], fused)
-        if DD <= 64 and DB == 1:
+        # For small dimensions, move packing into outer fused loop to better
+        # hide multi-threading overhead instead of parallelizing it
+        # (Tested on a Raspberry Pi 4 Model B)
+        if DD > 64:
+            s[data_vec].parallel(dco)
+        else:
             s[data_vec].compute_at(s[output], fused)
 
         nfactor = cfg["tile_y"].size[-1]
