@@ -360,10 +360,18 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
     if data_pad is not None:
         s[data_pad].compute_inline()
 
-    _, h, _, _, _, _, _ = s[data_vec].op.axis
+    _, h, _, d, _, _, _ = s[data_vec].op.axis
     cfg.define_split("tile_ah", cfg.axis(h), num_outputs=2, max_factor=32)
+    DH = cfg["tile_ah"].size[-1]
     oh, ih = cfg["tile_ah"].apply(s, data_vec, h)
-    s[data_vec].parallel(oh)
+    _, H, _, _, _, _, _ = data_vec.shape
+
+    # Parallelize outer channel axis if h is not split to try to ensure
+    # parallelization of outer data vector computation
+    if DH == H:
+        s[data_vec].parallel(d)
+    else:
+        s[data_vec].parallel(oh)
 
     # Parallelize data packing
     if data_pad != None:
@@ -371,7 +379,7 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
     else:
         data_vec_inner = data_vec.op.input_tensors[-1]
     data_vec_inner_op_tag = data_vec_inner.op.tag
-    dco, _, _, _, _ = data_vec_inner.op.axis
+    dn, dh, dw, dci, dco = data_vec_inner.op.axis
     if data_vec_inner_op_tag == "injective":
         # This happens for ab > 1, since then we need to concatenate values
         # after packing
@@ -379,7 +387,8 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
         for pack in data_pack:
             # Compute bit-packing and concatenate in same outer loop
             s[pack].compute_at(s[data_vec_inner], dco)
-    s[data_vec_inner].compute_at(s[data_vec], oh)
+            pass
+    s[data_vec_inner].parallel(dh)
 
     #### Schedule kernel packing
     co, _, _, _, _, _ = s[kernel_vec].op.axis
@@ -390,7 +399,7 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
     # Parallelize kernel packing
     kernel_vec_inner = kernel_vec.op.input_tensors[-1]
     kernel_vec_inner_op_tag = kernel_vec_inner.op.tag
-    kco, _, _, _, _ = kernel_vec_inner.op.axis
+    kh, kw, _, kci, kco = kernel_vec_inner.op.axis
     if kernel_vec_inner_op_tag == "injective":
         # This happens for wb > 1, since then we need to concatenate values
         # after packing
@@ -398,7 +407,8 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
         for pack in kernel_pack:
             # Compute bit-packing and concatenate in same outer loop
             s[pack].compute_at(s[kernel_vec_inner], kco)
-    s[kernel_vec_inner].compute_at(s[kernel_vec], oco)
+            pass
+    s[kernel_vec_inner].parallel(kci)
 
     ##### Schedule Convolution
     n, oh, ow, co, vh, vw, vc = s[conv_out].op.axis
@@ -425,13 +435,14 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
         s[output].compute_inline()
 
     s[conv_out].compute_at(s[last], co)
-    s[last].parallel(oh)
-
-    # Parallelize outer channel axis if h was not split to ensure
-    # parallelization of convolution
     _, H, _, _ = last.shape
+
+    # Parallelize outer channel axis if h is not split to ensure
+    # parallelization of convolution
     if VH == H:
         s[last].parallel(co)
+    else:
+        s[last].parallel(oh)
 
     return s
 
