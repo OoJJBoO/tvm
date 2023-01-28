@@ -69,10 +69,10 @@ def bitserial_dense_aarch64(cfg, data, weight, data_bits, weight_bits, pack_dtyp
     db, wb, k = cfg.reduce_axis(DB), cfg.reduce_axis(WB), cfg.reduce_axis(in_dim)
 
     ko, ki = cfg.define_split(
-        "tile_k", k, num_outputs=2, filter=lambda xx: xx.size[-1] == 8 or xx.size[-1] == 16
+        "tile_k", k, num_outputs=2 #, filter=lambda xx: xx.size[-1] == 8 or xx.size[-1] == 16
     )
     xo, xi = cfg.define_split("tile_x", x, num_outputs=2)
-    yo, yi = cfg.define_split("tile_y", y, num_outputs=2, filter=lambda xx: xx.size[-1] == 8)
+    yo, yi = cfg.define_split("tile_y", y, num_outputs=2) #, filter=lambda xx: xx.size[-1] == 8)
 
     cfg.define_reorder(
         "reorder_0",
