@@ -221,7 +221,7 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
 
         nfactor = cfg["tile_y"].size[-1]
         kfactor = cfg["tile_k"].size[-1]
-        if nfactor % 8 == 0:
+        if nfactor % 8 == 0 and kfactor % 8 == 0:
             pc = _intrin_popcount_aarch64(nfactor, kfactor, WB, DB, unipolar)
             s[output].tensorize(wb, pc)
 
