@@ -86,9 +86,9 @@ def bitserial_conv2d_nhwc_aarch64(
     ci, kh, kw = cfg.reduce_axis(CI_packed), cfg.reduce_axis(KH), cfg.reduce_axis(KW)
     ib, kb = cfg.reduce_axis(activation_bits), cfg.reduce_axis(weight_bits)
 
-    co, vc = cfg.define_split("tile_co", co, num_outputs=2, filter=lambda x: max(x.size[1:]) <= 16)
-    oh, vh = cfg.define_split("tile_oh", oh, num_outputs=2, filter=lambda x: max(x.size[1:]) <= 16)
-    ow, vw = cfg.define_split("tile_ow", ow, num_outputs=2, filter=lambda x: max(x.size[1:]) <= 16)
+    co, vc = cfg.define_split("tile_co", co, num_outputs=2, filter=lambda x: x.size[-1] == 8)
+    oh, vh = cfg.define_split("tile_oh", oh, num_outputs=2, filter=lambda x: x.size[-1] >= 2)
+    ow, vw = cfg.define_split("tile_ow", ow, num_outputs=2, filter=lambda x: x.size[-1] >= 2)
     ci_o, ci_i = cfg.define_split(
         "tile_ci", ci, num_outputs=2, filter=lambda x: x.size[-1] == 8 or x.size[-1] == 16
     )
@@ -410,9 +410,9 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
         s, conv_out, [n, oh, ow, co, vh, vw, kh, kw, ci_o, kb, ib, vc, ci_i]
     )
 
-    # Use microkernel if ci and co are multiples of 8 in size
+    # Use microkernel
     kfactor = cfg["tile_ci"].size[1]
-    if kfactor % 8 == 0 and VC % 8 == 0:
+    if kfactor % 8 == 0:
         pc = _intrin_popcount_aarch64(VC, kfactor, KB, IB, unipolar)
         s[conv_out].tensorize(kb, pc)
 
