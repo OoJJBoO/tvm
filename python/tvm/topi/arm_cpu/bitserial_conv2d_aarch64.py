@@ -365,13 +365,13 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
     s[data_vec].parallel(oh)
 
     # Parallelize data packing
-    if data_pad != None:
+    if data_pad is not None:
         data_vec_inner = data_pad.op.input_tensors[-1]
     else:
         data_vec_inner = data_vec.op.input_tensors[-1]
     data_vec_inner_op_tag = data_vec_inner.op.tag
     dn, dh, dw, dci, dco = data_vec_inner.op.axis
-    if data_vec_inner_op_tag == "injective":
+    if "injective" in data_vec_inner_op_tag:
         # This happens for ab > 1, since then we need to concatenate values
         # after packing
         data_pack = data_vec_inner.op.input_tensors
@@ -389,9 +389,11 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
 
     # Parallelize kernel packing
     kernel_vec_inner = kernel_vec.op.input_tensors[-1]
+    if "pad" in kernel_vec.op.tag:
+        kernel_vec_inner = kernel_vec_inner.op.input_tensors[-1]
     kernel_vec_inner_op_tag = kernel_vec_inner.op.tag
     kh, kw, _, kci, kco = kernel_vec_inner.op.axis
-    if kernel_vec_inner_op_tag == "injective":
+    if "injective" in kernel_vec_inner_op_tag:
         # This happens for wb > 1, since then we need to concatenate values
         # after packing
         kernel_pack = kernel_vec_inner.op.input_tensors

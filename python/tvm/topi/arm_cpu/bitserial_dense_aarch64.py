@@ -187,7 +187,7 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
         weight_vec_op_tag = weight_vec_inner.op.tag
         WD, _, _ = get_const_tuple(weight_vec_inner.shape)
         wco, _, _ = weight_vec_inner.op.axis
-        if weight_vec_op_tag == "injective":
+        if "injective" in weight_vec_op_tag:
             # This happens for wb > 1, since then we need to concatenate values
             # after packing
             weight_pack = weight_vec_inner.op.input_tensors
@@ -204,7 +204,7 @@ def schedule_bitserial_dense_aarch64(cfg, outs):
         # Parallelize data packing
         data_vec_op_tag = data_vec.op.tag
         dco, _, _ = data_vec.op.axis
-        if data_vec_op_tag == "injective":
+        if "injective" in data_vec_op_tag:
             # This happens for ab > 1, since then we need to concatenate values
             # after packing
             data_pack = data_vec.op.input_tensors
