@@ -380,6 +380,16 @@ class PopenPoolExecutor:
         self._lock.release()
         self._threadpool.shutdown()
 
+    def destroy(self):
+        self._lock.acquire()
+        for worker in self._worker_map.values():
+            try:
+                worker.kill()
+            except ImportError:
+                pass
+        self._lock.release()
+        self._threadpool.shutdown()
+
     def _worker_run(self, fn, args, kwargs):
         """Internal thread runner."""
         self._lock.acquire()

@@ -161,6 +161,7 @@ class XGBoostCostModel(CostModel):
 
     def _close_pool(self):
         if self.pool:
+            self.pool.destroy()
             self.pool = None
 
     def _get_pool(self):
