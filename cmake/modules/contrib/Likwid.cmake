@@ -1,5 +1,5 @@
 if (USE_LIKWID)
-  message(STATUS "Using Likwid library")
+  message(STATUS "Using LIKWID library")
   target_link_libraries(tvm_runtime_objs PRIVATE -llikwid)
   target_link_libraries(tvm PRIVATE -llikwid)
   target_link_libraries(tvm_runtime PRIVATE -llikwid)
