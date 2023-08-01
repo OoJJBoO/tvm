@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=invalid-name,unused-variable,invalid-name,unused-argument
-"""Bitserial conv2d schedule on arm cpu using the custom aarch64 popcount kernel."""
+"""Bitserial conv2d schedule on arm cpu using a variant of the 32-bit popcount kernel ported to AArch64."""
 from __future__ import absolute_import as _abs
 import tvm
 from tvm import te
@@ -81,12 +81,16 @@ def bitserial_conv2d_nhwc_aarch64(
 
     # ==================== define configuration space ====================
     n, oh, ow, co = cfg.axis(N), cfg.axis(OH), cfg.axis(OW), cfg.axis(CO)
-    ci, kh, kw = cfg.reduce_axis(CI_packed), cfg.reduce_axis(KH), cfg.reduce_axis(KW)
+    ci, kh, kw = cfg.reduce_axis(
+        CI_packed), cfg.reduce_axis(KH), cfg.reduce_axis(KW)
     ib, kb = cfg.reduce_axis(activation_bits), cfg.reduce_axis(weight_bits)
 
-    co, vc = cfg.define_split("tile_co", co, num_outputs=2, filter=lambda x: x.size[-1] == 8)
-    oh, vh = cfg.define_split("tile_oh", oh, num_outputs=2, filter=lambda x: x.size[-1] >= 2)
-    ow, vw = cfg.define_split("tile_ow", ow, num_outputs=2, filter=lambda x: x.size[-1] >= 2)
+    co, vc = cfg.define_split(
+        "tile_co", co, num_outputs=2, filter=lambda x: x.size[-1] == 8)
+    oh, vh = cfg.define_split(
+        "tile_oh", oh, num_outputs=2, filter=lambda x: x.size[-1] >= 2)
+    ow, vw = cfg.define_split(
+        "tile_ow", ow, num_outputs=2, filter=lambda x: x.size[-1] >= 2)
     ci_o, ci_i = cfg.define_split(
         "tile_ci", ci, num_outputs=2, filter=lambda x: x.size[-1] == 8 or x.size[-1] == 16
     )
@@ -100,19 +104,23 @@ def bitserial_conv2d_nhwc_aarch64(
         ],
     )
     # binary ops
-    cfg.add_flop(2 * N * OH * OW * CO * CI * KH * KW * binary_op_multiplier(pack_dtype))
+    cfg.add_flop(2 * N * OH * OW * CO * CI * KH *
+                 KW * binary_op_multiplier(pack_dtype))
     # ====================
 
     VC = cfg["tile_co"].size[-1]
     VH = cfg["tile_oh"].size[-1]
     VW = cfg["tile_ow"].size[-1]
 
-    data_q = bitpack(data, activation_bits, pack_axis=3, bit_axis=3, pack_type="uint8")
+    data_q = bitpack(data, activation_bits, pack_axis=3,
+                     bit_axis=3, pack_type="uint8")
 
-    kernel_vec = _kernel_vec_spatial_pack_nhwc(kernel, weight_bits, VC, len(kernel.shape) == 4)
+    kernel_vec = _kernel_vec_spatial_pack_nhwc(
+        kernel, weight_bits, VC, len(kernel.shape) == 4)
     idxm = tvm.tir.indexmod
     if idxm(kernel_vec.shape[-1], 8) != 0 and CI_PAD != 0:
-        kernel_vec = pad(kernel_vec, [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, CI_PAD])
+        kernel_vec = pad(kernel_vec, [0, 0, 0, 0, 0, 0], [
+                         0, 0, 0, 0, 0, CI_PAD])
 
     N, H, W, IB, CI = data_q.shape
     OCO, KH, KW, KB, VC, CI = kernel_vec.shape
@@ -129,15 +137,18 @@ def bitserial_conv2d_nhwc_aarch64(
     ovshape = (1, OH // VH, OW // VW, CO // VC, VH, VW, VC)
 
     if TPAD != 0 and RPAD != 0:
-        data_pad = pad(data_q, (0, TPAD, LPAD, 0, 0), (0, DPAD, RPAD, 0, CI_PAD), name="data_pad")
+        data_pad = pad(data_q, (0, TPAD, LPAD, 0, 0),
+                       (0, DPAD, RPAD, 0, CI_PAD), name="data_pad")
     elif CI_PAD != 0:
-        data_pad = pad(data_q, (0, 0, 0, 0, 0), (0, 0, 0, 0, CI_PAD), name="data_pad")
+        data_pad = pad(data_q, (0, 0, 0, 0, 0),
+                       (0, 0, 0, 0, CI_PAD), name="data_pad")
     else:
         data_pad = data_q
 
     data_vec = te.compute(
         dvshape,
-        lambda n, h, w, vh, vw, b, ci: data_pad[n][h * VH * HSTR + vh][w * VW * WSTR + vw][b][ci],
+        lambda n, h, w, vh, vw, b, ci: data_pad[n][h *
+                                                   VH * HSTR + vh][w * VW * WSTR + vw][b][ci],
         name="data_vec",
     )
     ci = te.reduce_axis((0, CI), name="ci")
@@ -177,14 +188,17 @@ def bitserial_conv2d_nhwc_aarch64(
         )
 
     if unipolar:
-        conv_vec = te.compute(ovshape, _unipolar_conv, name="conv_vec", tag="unipolar")
+        conv_vec = te.compute(ovshape, _unipolar_conv,
+                              name="conv_vec", tag="unipolar")
     else:
-        conv_vec = te.compute(ovshape, _bipolar_conv, name="conv_vec", tag="bipolar")
+        conv_vec = te.compute(ovshape, _bipolar_conv,
+                              name="conv_vec", tag="bipolar")
 
     conv = te.compute(
         oshape,
         lambda n, h, w, co: conv_vec[
-            n, idxd(h, VH), idxd(w, VW), idxd(co, VC), idxm(h, VH), idxm(w, VW), idxm(co, VC)
+            n, idxd(h, VH), idxd(w, VW), idxd(co, VC), idxm(
+                h, VH), idxm(w, VW), idxm(co, VC)
         ].astype(out_dtype),
         name="conv",
         tag="spatial_bitserial_conv_nhwc",
@@ -213,8 +227,10 @@ def _intrin_popcount_aarch64(m, k_i, w_b, x_b, unipolar):
             (m,),
             lambda i: te.sum(
                 (
-                    tvm.tir.popcount(w[bw, i, k].astype(dtype) & x[bx, k].astype(dtype))
-                    - tvm.tir.popcount(~w[bw, i, k].astype(dtype) & x[bx, k].astype(dtype))
+                    tvm.tir.popcount(w[bw, i, k].astype(
+                        dtype) & x[bx, k].astype(dtype))
+                    - tvm.tir.popcount(~w[bw, i, k].astype(dtype)
+                                       & x[bx, k].astype(dtype))
                 )
                 << (bw + bx).astype(dtype),
                 axis=[bw, bx, k],
@@ -226,7 +242,8 @@ def _intrin_popcount_aarch64(m, k_i, w_b, x_b, unipolar):
         z = te.compute(
             (m,),
             lambda i: te.sum(
-                tvm.tir.popcount(w[bw, i, k].astype(dtype) & x[bx, k].astype(dtype))
+                tvm.tir.popcount(w[bw, i, k].astype(
+                    dtype) & x[bx, k].astype(dtype))
                 << (bw + bx).astype(dtype),
                 axis=[bw, bx, k],
             ),
@@ -238,7 +255,8 @@ def _intrin_popcount_aarch64(m, k_i, w_b, x_b, unipolar):
     Xb = tvm.tir.decl_buffer(
         x.shape, x.dtype, name="X", offset_factor=k_i, strides=[te.var("ldw"), 1]
     )
-    Zb = tvm.tir.decl_buffer(z.shape, z.dtype, name="Z", offset_factor=1, strides=[1])
+    Zb = tvm.tir.decl_buffer(z.shape, z.dtype, name="Z",
+                             offset_factor=1, strides=[1])
 
     def _intrin_func(ins, outs):
         ww, xx = ins
@@ -249,7 +267,7 @@ def _intrin_popcount_aarch64(m, k_i, w_b, x_b, unipolar):
         if unipolar:
             vpadd = "llvm.aarch64.neon.addp"
             # normally, we would use sadalp here, but for some reason LLVM does
-            # not seem to support that at the moment, so we use saddlp and add 
+            # not seem to support that at the moment, so we use saddlp and add
             # the vectors manually later.
             vpadalu = "llvm.aarch64.neon.saddlp"
             full_dtype = "int8x16"
@@ -278,27 +296,35 @@ def _intrin_popcount_aarch64(m, k_i, w_b, x_b, unipolar):
                 for bx in range(x_b):
                     if k_i == 16:
                         for i in range(m):
-                            w_ = ww.vload([bw, i, 0], "uint8x16").astype(full_dtype)
-                            x_ = xx.vload([bx, 0], "uint8x16").astype(full_dtype)
+                            w_ = ww.vload([bw, i, 0], "uint8x16").astype(
+                                full_dtype)
+                            x_ = xx.vload([bx, 0], "uint8x16").astype(
+                                full_dtype)
                             if unipolar:
-                                cnts = tvm.tir.popcount(w_ & x_) - tvm.tir.popcount(~w_ & x_)
+                                cnts = tvm.tir.popcount(
+                                    w_ & x_) - tvm.tir.popcount(~w_ & x_)
                             else:
                                 cnts = tvm.tir.popcount(w_ & x_)
-                            upper_half = tvm.tir.call_intrin(half_dtype, "tir.vectorhigh", cnts)
-                            lower_half = tvm.tir.call_intrin(half_dtype, "tir.vectorlow", cnts)
+                            upper_half = tvm.tir.call_intrin(
+                                half_dtype, "tir.vectorhigh", cnts)
+                            lower_half = tvm.tir.call_intrin(
+                                half_dtype, "tir.vectorlow", cnts)
                             cnts8[i] = upper_half + lower_half
                         for i in range(m // 2):
                             cnts4[i] = tvm.tir.call_llvm_pure_intrin(
-                                half_dtype, vpadd, args_2, cnts8[i * 2], cnts8[i * 2 + 1]
+                                half_dtype, vpadd, args_2, cnts8[i *
+                                                                 2], cnts8[i * 2 + 1]
                             )
                         for i in range(m // 4):
                             cnts2[i] = tvm.tir.call_llvm_pure_intrin(
-                                half_dtype, vpadd, args_2, cnts4[i * 2], cnts4[i * 2 + 1]
+                                half_dtype, vpadd, args_2, cnts4[i *
+                                                                 2], cnts4[i * 2 + 1]
                             )
                         cnts = tvm.tir.call_intrin(
                             full_dtype, "tir.vectorcombine", cnts2[0], cnts2[1]
                         )
-                        shifted_cnts = cnts << tvm.tir.const(bw + bx, pack_dtype)
+                        shifted_cnts = cnts << tvm.tir.const(
+                            bw + bx, pack_dtype)
                         out = tvm.tir.call_llvm_pure_intrin(
                             return_dtype, vpadalu, args_2, shifted_cnts
                         )
@@ -306,24 +332,30 @@ def _intrin_popcount_aarch64(m, k_i, w_b, x_b, unipolar):
                         out += zz.vload(0, return_dtype)
                     else:  # ki == 8
                         for i in range(m):
-                            w_ = ww.vload([bw, i, 0], "uint8x8").astype(half_dtype)
-                            x_ = xx.vload([bx, 0], "uint8x8").astype(half_dtype)
+                            w_ = ww.vload([bw, i, 0], "uint8x8").astype(
+                                half_dtype)
+                            x_ = xx.vload([bx, 0], "uint8x8").astype(
+                                half_dtype)
                             if unipolar:
-                                cnts8[i] = tvm.tir.popcount(w_ & x_) - tvm.tir.popcount(~w_ & x_)
+                                cnts8[i] = tvm.tir.popcount(
+                                    w_ & x_) - tvm.tir.popcount(~w_ & x_)
                             else:
                                 cnts8[i] = tvm.tir.popcount(w_ & x_)
                         for i in range(m // 2):
                             cnts4[i] = tvm.tir.call_llvm_pure_intrin(
-                                half_dtype, vpadd, args_2, cnts8[i * 2], cnts8[i * 2 + 1]
+                                half_dtype, vpadd, args_2, cnts8[i *
+                                                                 2], cnts8[i * 2 + 1]
                             )
                         for i in range(m // 4):
                             cnts2[i] = tvm.tir.call_llvm_pure_intrin(
-                                half_dtype, vpadd, args_2, cnts4[i * 2], cnts4[i * 2 + 1]
+                                half_dtype, vpadd, args_2, cnts4[i *
+                                                                 2], cnts4[i * 2 + 1]
                             )
                         cnts = tvm.tir.call_intrin(
                             full_dtype, "tir.vectorcombine", cnts2[0], cnts2[1]
                         )
-                        shifted_cnts = cnts << tvm.tir.const(bw + bx, pack_dtype)
+                        shifted_cnts = cnts << tvm.tir.const(
+                            bw + bx, pack_dtype)
                         # add the previous values since we can not use uadalp
                         out = tvm.tir.call_llvm_pure_intrin(
                             return_dtype, vpadalu, args_2, shifted_cnts
@@ -354,7 +386,7 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
     VH = cfg["tile_oh"].size[-1]
     VW = cfg["tile_ow"].size[-1]
 
-    ##### Schedule data padding and packing
+    # Schedule data padding and packing
     if data_pad is not None:
         s[data_pad].compute_inline()
 
@@ -363,13 +395,13 @@ def _schedule_spatial_conv2d_nhwc_aarch64(
     oh, ih = cfg["tile_ah"].apply(s, data_vec, h)
     s[data_vec].parallel(oh)
 
-    #### Schedule kernel packing
+    # Schedule kernel packing
     co, _, _, _, _, _ = s[kernel_vec].op.axis
     cfg.define_split("tile_bco", cfg.axis(co), num_outputs=2, max_factor=32)
     oco, ico = cfg["tile_bco"].apply(s, kernel_vec, co)
     s[kernel_vec].parallel(oco)
 
-    ##### Schedule Convolution
+    # Schedule Convolution
     n, oh, ow, co, vh, vw, vc = s[conv_out].op.axis
     kh, kw, kb, ib, ci = s[conv_out].op.reduce_axis
 
