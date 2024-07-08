@@ -264,9 +264,7 @@ def profile_function(mod, dev, collectors, func_name=None, warmup_iters=10):
     """
     if func_name is None:
         func_name = mod.entry_name
-    return _ffi_api.ProfileFunction(
-        mod, func_name, dev.device_type, dev.device_id, warmup_iters, collectors
-    )
+    return _ffi_api.ProfileFunction(mod, func_name, dev.device_type, dev.device_id, warmup_iters, collectors)
 
 
 # We only enable this class when TVM is build with PAPI support
@@ -291,3 +289,91 @@ if _ffi.get_global_func("runtime.profiling.PAPIMetricCollector", allow_missing=T
             for dev, names in metric_names.items():
                 wrapped[DeviceWrapper(dev)] = names
             self.__init_handle_by_constructor__(_ffi_api.PAPIMetricCollector, wrapped)
+
+
+# We only enable this class when TVM is build with LIKWID support
+if _ffi.get_global_func("runtime.profiling.LikwidMetricCollector", allow_missing=True) is not None:
+
+    @_ffi.register_object("runtime.profiling.LikwidMetricCollector")
+    class LikwidMetricCollector(MetricCollector):
+        """Collects performance counter metrics using the likwid-perfctr API.
+
+        Please make sure to run TVM through the likwid-perfctr wrapper application following the
+        instructions given in the Likwid documentation!
+        """
+
+        def __init__(
+            self,
+            collect_raw_events: bool = True,
+            collect_derived_metrics: bool = False,
+            collect_thread_counts: bool = False,
+        ):
+            """Create a new collector object.
+
+            Parameters
+            ----------
+            collect_raw_events : bool
+                If this is true, collect the raw event counts defined in the set event group.
+            collect_derived_metrics : bool
+                If this is true, collect the derived metrics defined in the set event group.
+            collect_thread_counts : bool
+                If this is true, also collect the event counts of each known thread instead of only
+                the total.
+            """
+            self.__init_handle_by_constructor__(
+                _ffi_api.LikwidMetricCollector, collect_raw_events, collect_derived_metrics, collect_thread_counts
+            )
+
+    # Import VirtualMachineProfiler to enable typing for convenience method
+    from tvm.runtime.profiler_vm import VirtualMachineProfiler
+
+    def rpc_likwid_profile_func(
+        runtime_mod: Module,
+        vm: VirtualMachineProfiler,
+        func_name: str = "main",
+        collect_raw_events: bool = True,
+        collect_derived_metrics: bool = False,
+        collect_thread_counts: bool = False,
+        *args,
+        **kwargs,
+    ) -> Report:
+        """Convenience function to profile a given function over RPC using LIKWID performance
+        metrics.
+
+        Start a call to the profile function of the given vm profiler (that can be remote!) and
+        report results.
+
+        Parameters
+        ----------
+        runtime_mod : Module
+            The (remote) runtime module to get global functions from. Normally this will be the one
+            returned by rpc.connect().
+        vm : VirtualMachineProfiler
+            The vm profiler to use. Please make sure the vm is initialized and the module to profile
+            is loaded before calling this function.
+        func_name : str
+            The name of the function that should be profiled.
+        collect_raw_events : bool
+            If this is true, collect the raw event counts defined in the set event group.
+        collect_derived_metrics : bool
+            If this is true, collect the derived metrics defined in the set event group.
+        collect_thread_counts : bool
+            If this is true, also collect the event counts of each known thread instead of only the
+            total.
+        args : list[tvm.runtime.NDArray] or list[np.ndarray]
+            Arguments that are passed to the profiled function.
+        kwargs: dict of str to tvm.runtime.NDArray or np.ndarray
+            Named arguments that are passed to the profiled function.
+
+        Returns
+        -------
+        report : Report
+            The collected performance metrics.
+        """
+        if args or kwargs:
+            vm.set_input(func_name, *args, **kwargs)
+        profile_func = runtime_mod.get_function("runtime.rpc_likwid_profile_func")
+        report_json = profile_func(
+            vm.module, func_name, collect_raw_events, collect_derived_metrics, collect_thread_counts
+        )
+        return Report.from_json(report_json)
