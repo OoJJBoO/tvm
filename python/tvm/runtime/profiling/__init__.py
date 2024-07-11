@@ -19,7 +19,7 @@
 from typing import Dict, Sequence, Optional
 from ... import _ffi
 from . import _ffi_api
-from .. import Object, Device
+from .. import Object, Device, Module
 
 
 @_ffi.register_object("runtime.profiling.Report")
