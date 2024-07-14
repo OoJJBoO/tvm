@@ -17,6 +17,7 @@
 """Registration of profiling objects in python."""
 
 from typing import Dict, Sequence, Optional
+
 from ... import _ffi
 from . import _ffi_api
 from .. import Object, Device, Module
@@ -324,11 +325,13 @@ if _ffi.get_global_func("runtime.profiling.LikwidMetricCollector", allow_missing
                 _ffi_api.LikwidMetricCollector, collect_raw_events, collect_derived_metrics, collect_thread_counts
             )
 
-    # Import VirtualMachineProfiler to enable typing for convenience method
+    # Import VirtualMachineProfiler and RPCSession to enable typing for convenience method
     from tvm.runtime.profiler_vm import VirtualMachineProfiler
+    from tvm.rpc.client import RPCSession
+
 
     def rpc_likwid_profile_func(
-        runtime_mod: Module,
+        runtime_mod: Module | RPCSession,
         vm: VirtualMachineProfiler,
         func_name: str = "main",
         collect_raw_events: bool = True,
