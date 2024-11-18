@@ -296,35 +296,80 @@ if _ffi.get_global_func("runtime.profiling.PAPIMetricCollector", allow_missing=T
 # We only enable this class when TVM is build with LIKWID support
 if _ffi.get_global_func("runtime.profiling.LikwidMetricCollector", allow_missing=True) is not None:
 
-    @_ffi.register_object("runtime.profiling.LikwidMetricCollector")
-    class LikwidMetricCollector(MetricCollector):
-        """Collects performance counter metrics using the likwid-perfctr API.
+    from logging import getLogger
 
-        Please make sure to run TVM through the likwid-perfctr wrapper application following the
-        instructions given in the Likwid documentation!
+    @_ffi.register_object("runtime.profiling.LikwidMetricCollectorConfiguration")
+    class LikwidMetricCollectorConfiguration(Object):
+        """Used to configure counter setup and metric reporting of a `LikwidMetricCollector`.
         """
 
         def __init__(
             self,
-            collect_raw_events: bool = True,
-            collect_derived_metrics: bool = False,
-            collect_thread_counts: bool = False,
+            event_strings: Sequence[str],
+            report_events: bool,
+            report_metrics: bool,
+            report_per_thread: bool,
         ):
-            """Create a new collector object.
-
+            """
             Parameters
             ----------
-            collect_raw_events : bool
-                If this is true, collect the raw event counts defined in the set event group.
-            collect_derived_metrics : bool
-                If this is true, collect the derived metrics defined in the set event group.
-            collect_thread_counts : bool
-                If this is true, also collect the event counts of each known thread instead of only
-                the total.
+            event_strings : Sequence[str]
+                List of event strings to use for counter setup. This can be
+
+                    1. a list of events in the form Eventname:Countername(:Option1:Option2:...)
+                    2. a list containing a single pre-defined group name available on your target system.
+
+                For more information please refer to the likwid-perfctr documentation.
+
+            report_events : bool
+                If `True`, report raw event counts.
+
+            report_metrics : bool
+                If `True`, report derived metrics defined by the group (if any).
+
+            report_per_thread : bool
+                If true, report event counts and metrics per thread in the form `[NAME]_[THREAD_ID]`.
+                Otherwise, only total values are reported.
             """
+            # Split provided event strings in case the user already specified combined strings.
+            processed_event_strings = []
+            for event_string in event_strings:
+                processed_event_strings.extend(event_string.split(","))
+
+            # Check if the user specified multiple pre-defined group names (i.e., event strings without ':' divider).
+            if len(processed_event_strings) > 1:
+                for event_string in processed_event_strings:
+                    if ":" in event_string:
+                        continue
+                    getLogger(__name__).warning(
+                        f"Event string '{event_string}' seems to name a pre-defined performance group, "
+                        "but additional event strings were specified. This is not supported. "
+                        f"Restricting measurements to '{event_string}'."
+                    )
+                    processed_event_strings = [event_string]
+                    break
             self.__init_handle_by_constructor__(
-                _ffi_api.LikwidMetricCollector, collect_raw_events, collect_derived_metrics, collect_thread_counts
+                _ffi_api.LikwidMetricCollectorConfiguration,
+                processed_event_strings,
+                report_events,
+                report_metrics,
+                report_per_thread,
             )
+
+    @_ffi.register_object("runtime.profiling.LikwidMetricCollector")
+    class LikwidMetricCollector(MetricCollector):
+        """A metric collector implementation that uses the LIKWID API to read hardware counters.
+        """
+
+        def __init__(self, config: LikwidMetricCollectorConfiguration):
+            """
+            Parameters
+            ----------
+            config : LikwidMetricCollectorConfiguration
+                The configuration to use to setup counters and configure metric reporting.
+            """
+            self.__init_handle_by_constructor__(_ffi_api.LikwidMetricCollector, config)
+
 
     # Import VirtualMachineProfiler and RPCSession to enable typing for convenience method
     from tvm.runtime.profiler_vm import VirtualMachineProfiler
@@ -334,10 +379,8 @@ if _ffi.get_global_func("runtime.profiling.LikwidMetricCollector", allow_missing
     def rpc_likwid_profile_func(
         runtime_mod: Module | RPCSession,
         vm: VirtualMachineProfiler,
+        config: LikwidMetricCollectorConfiguration,
         func_name: str = "main",
-        collect_raw_events: bool = True,
-        collect_derived_metrics: bool = False,
-        collect_thread_counts: bool = False,
         *args,
         **kwargs,
     ) -> Report:
@@ -355,15 +398,10 @@ if _ffi.get_global_func("runtime.profiling.LikwidMetricCollector", allow_missing
         vm : VirtualMachineProfiler
             The vm profiler to use. Please make sure the vm is initialized and the module to profile
             is loaded before calling this function.
+        config : LikwidMetricCollectorConfiguration
+            The configuration to use for setting up the LIKWID-based metric collector on the remote.
         func_name : str
             The name of the function that should be profiled.
-        collect_raw_events : bool
-            If this is true, collect the raw event counts defined in the set event group.
-        collect_derived_metrics : bool
-            If this is true, collect the derived metrics defined in the set event group.
-        collect_thread_counts : bool
-            If this is true, also collect the event counts of each known thread instead of only the
-            total.
         args : list[tvm.runtime.NDArray] or list[np.ndarray]
             Arguments that are passed to the profiled function.
         kwargs: dict of str to tvm.runtime.NDArray or np.ndarray
@@ -377,7 +415,5 @@ if _ffi.get_global_func("runtime.profiling.LikwidMetricCollector", allow_missing
         if args or kwargs:
             vm.set_input(func_name, *args, **kwargs)
         profile_func = runtime_mod.get_function("runtime.rpc_likwid_profile_func")
-        report_json = profile_func(
-            vm.module, func_name, collect_raw_events, collect_derived_metrics, collect_thread_counts
-        )
+        report_json = profile_func(vm.module, func_name, config)
         return Report.from_json(report_json)

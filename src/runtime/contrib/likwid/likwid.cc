@@ -1,5 +1,5 @@
 #include <likwid.h>
-#include <math.h>
+#include <stdio.h>
 #include <tvm/runtime/contrib/likwid.h>
 
 #include <string>
@@ -11,402 +11,336 @@ namespace profiling {
 namespace likwid {
 
 // -------------------------------------------------------------------------------------------------
-// Some constants
+// Event Set Node
 // -------------------------------------------------------------------------------------------------
 
-constexpr const char* REGION_NAME = "LikwidMetricCollector";
+struct LikwidCounterStateNode : public Object {
+ public:
+  std::unordered_map<std::string, std::vector<double>> data;
+  Device device;
 
-constexpr const char* OVERFLOW_WARNING =
-    "Detected overflow while reading performance counter, "
-    "setting value to -1!";
+  explicit LikwidCounterStateNode(std::unordered_map<std::string, std::vector<double>> data,
+                                  Device dev)
+      : data(data), device(dev) {}
 
-constexpr const char* NAN_WARNING =
-    "Encountered NaN value, setting it to -1 instead and "
-    "skipping it on total count!";
+  static constexpr const char* _type_key = "LikwidCounterStateNode";
 
-constexpr const char* NO_METRICS_WARNING =
-    "Current event group does not have any metrics! Maybe "
-    "consider enabling collection of raw events?";
-
-constexpr const char* THREAD_COUNT_ERROR = "No threads are known to LIKWID perfmon!";
-
-// -------------------------------------------------------------------------------------------------
-// Convenience functions with error printing
-// -------------------------------------------------------------------------------------------------
-
-/*! \brief Register default marker region and print errors. */
-inline void _marker_register_region() {
-  // LOG(INFO) << "Register marker region...";
-  int status = likwid_markerRegisterRegion(REGION_NAME);
-  if (status != 0) {
-    LOG(ERROR) << "Could not register region! Status: " << status;
-  }
-}
-
-/*! \brief Start default marker region and print errors. */
-inline void _marker_start_region() {
-  // LOG(INFO) << "Start marker region...";
-  int status = likwid_markerStartRegion(REGION_NAME);
-  if (status != 0) {
-    LOG(ERROR) << "Could not start marker region! Status: " << status;
-  }
-}
-
-/*! \brief Stop default marker region and print errors. */
-inline void _marker_stop_region() {
-  // LOG(INFO) << "Stop marker region...";
-  int status = likwid_markerStopRegion(REGION_NAME);
-  if (status != 0) {
-    LOG(ERROR) << "Could not stop marker region! Status: " << status;
-  }
-}
-
-/*! \brief Get results of the given marker region and print errors.
- *
- * \param region_tag [in] The tag of the region to read.
- * \param nevents [in/out] The size of the `events` array. Will be set to the number of available
- * metrics on return.
- * \param events [in/out] Array containing the collected event counts.
- * \param time [out] The elapsed time since the region was started.
- * \param count [out] The call count of the marker region.
- */
-inline void _marker_get_region(const char* region_tag, int* nevents, double* events, double* time,
-                               int* count) {
-  // LOG(INFO) << "Get marker region...";
-  likwid_markerGetRegion(region_tag, nevents, events, time, count);
-  if (nevents == 0) {
-    LOG(WARNING) << "Event count is zero!";
-  }
-}
-
-/*! \brief Read the current event set's counters.
- *
- * \param nevents [in/out] The size of the `events` array. Will be set to the number of available
- * metrics on return.
- * \param events [in/out] Array containing the collected event counts.
- * \param time [out] The elapsed time since the region was started.
- * \param count [out] The call count of the marker region.
- */
-inline void _marker_read_event_counts(int* nevents, double* events, double* time, int* count) {
-  // LOG(INFO) << "Read marker event counts...";
-  _marker_stop_region();
-  _marker_get_region(REGION_NAME, nevents, events, time, count);
-  _marker_start_region();
-}
-
-/*! \brief Read all counters of the given group ID and print errors. */
-inline void _perfmon_read_group(int group_id) {
-  // LOG(INFO) << "Read group counters...";
-  int status = perfmon_readGroupCounters(group_id);
-  if (status < 0) {
-    LOG(ERROR) << "Error while reading group counters! Status: " << status;
-  }
-}
-
-/*! \brief Start perfmon counters and print errors. */
-inline void _perfmon_start_counters() {
-  // LOG(INFO) << "Start counters...";
-  int status = perfmon_startCounters();
-  if (status != 0) {
-    LOG(ERROR) << "Could not start counters! Status: " << status;
-  }
-}
-
-/*! \brief Stop perfmon counters and print errors. */
-inline void _perfmon_stop_counters() {
-  // LOG(INFO) << "Stop counters...";
-  int status = perfmon_stopCounters();
-  if (status != 0) {
-    LOG(ERROR) << "Could not stop counters! Status: " << status;
-  }
-}
-
-/*! \brief Read the current group's counters on all known threads and report results.
- *
- * \return An unordered map mapping the names of the metrics inside the current event group to a
- * list of their respective per-thread counts.
- */
-std::unordered_map<std::string, std::vector<double>> _perfmon_read_and_get_metrics() {
-  // LOG(INFO) << "Read and get metrics...";
-  int group_id = perfmon_getIdOfActiveGroup();
-  _perfmon_read_group(group_id);
-  int number_of_metrics = perfmon_getNumberOfMetrics(group_id);
-  int number_of_threads = perfmon_getNumberOfThreads();
-  std::unordered_map<std::string, std::vector<double>> result_map;
-  for (int metric_id{}; metric_id < number_of_metrics; ++metric_id) {
-    std::string metric_name = perfmon_getMetricName(group_id, metric_id);
-    std::vector<double> results;
-    for (int thread_id{}; thread_id < number_of_threads; ++thread_id) {
-      results.push_back(perfmon_getMetric(group_id, metric_id, thread_id));
-    }
-    result_map[metric_name] = results;
-  }
-  return result_map;
-}
-
-/*! \brief Read the current group's counters on all known threads and report results.
- *
- * \return An unordered map mapping the names of the events inside the current event group to a list
- * of their respective per-thread counts.
- */
-std::unordered_map<std::string, std::vector<double>> _perfmon_read_and_get_results() {
-  // LOG(INFO) << "Read and get results...";
-  int group_id = perfmon_getIdOfActiveGroup();
-  _perfmon_read_group(group_id);
-  int number_of_events = perfmon_getNumberOfEvents(group_id);
-  int number_of_threads = perfmon_getNumberOfThreads();
-  std::unordered_map<std::string, std::vector<double>> result_map;
-  for (int event_id{}; event_id < number_of_events; ++event_id) {
-    std::string event_name = perfmon_getEventName(group_id, event_id);
-    std::vector<double> results;
-    for (int thread_id{}; thread_id < number_of_threads; ++thread_id) {
-      results.push_back(perfmon_getResult(group_id, event_id, thread_id));
-    }
-    result_map[event_name] = results;
-  }
-  return result_map;
-}
-
-// -------------------------------------------------------------------------------------------------
-// Likwid MetricCollector
-// -------------------------------------------------------------------------------------------------
-
-/*! \brief Object holding start values of collected metrics. */
-struct LikwidEventSetNode : public Object {
-  std::unordered_map<std::string, std::vector<double>> start_values;
-  Device dev;
-
-  /*! \brief Construct a new event set node.
-   *
-   * \param start_values The event values at the time of creating this node.
-   * \param dev The device this node is created for.
-   */
-  explicit LikwidEventSetNode(std::unordered_map<std::string, std::vector<double>> start_values,
-                              Device dev)
-      : start_values(start_values), dev(dev) {}
-
-  static constexpr const char* _type_key = "LikwidEventSetNode";
-  TVM_DECLARE_FINAL_OBJECT_INFO(LikwidEventSetNode, Object);
+  TVM_DECLARE_FINAL_OBJECT_INFO(LikwidCounterStateNode, Object);
 };
 
-/*! \brief MetricCollectorNode for metrics collected using likwid-perfctr API.
- *
- * \note Please make sure to run TVM through the likwid-perfctr wrapper application following the
- * instructions given in the Likwid documentation when using this collector!
- */
+TVM_REGISTER_OBJECT_TYPE(LikwidCounterStateNode);
+
+// -------------------------------------------------------------------------------------------------
+// Collector configuration
+// -------------------------------------------------------------------------------------------------
+
+/// @brief Data class defining the setup parameters for constructing a LikwidMetricCollector.
+struct LikwidMetricCollectorConfigurationNode : public Object {
+  Array<String> event_strings;
+  bool report_events;
+  bool report_metrics;
+  bool report_per_thread;
+
+ public:
+  /// @brief Construct a new LikwidMetricCollectorConfigurationNode.
+  /// @param event_strings The event strings to use for LIKWID setup.
+  /// @param report_events If true, report raw event counts.
+  /// @param report_metrics If true, report derived metrics defined by the group (if any).
+  /// @param report_per_thread If true, report event counts and metrics per thread in the form
+  /// [NAME]_[THREAD_ID]. Otherwise, only total values are reported.
+  LikwidMetricCollectorConfigurationNode(Array<String> event_strings, bool report_events,
+                                         bool report_metrics, bool report_per_thread)
+      : event_strings(event_strings),
+        report_events(report_events),
+        report_metrics(report_metrics),
+        report_per_thread(report_per_thread) {}
+
+  static constexpr const char* _type_key = "runtime.profiling.LikwidMetricCollectorConfiguration";
+
+  TVM_DECLARE_FINAL_OBJECT_INFO(LikwidMetricCollectorConfigurationNode, Object);
+};
+
+TVM_REGISTER_OBJECT_TYPE(LikwidMetricCollectorConfigurationNode);
+
+/// @brief Container for a LikwidMetricCollectorConfigurationNode.
+struct LikwidMetricCollectorConfiguration : public ObjectRef {
+  /// @brief Construct a new LikwidMetricCollectorConfiguration.
+  /// @param event_strings The event strings to use for LIKWID setup.
+  /// @param report_events If true, report raw event counts.
+  /// @param report_metrics If true, report derived metrics defined by the group (if any).
+  /// @param report_per_thread If true, report event counts and metrics per thread in the form
+  /// [NAME]_[THREAD_ID]. Otherwise, only total values are reported.
+  explicit LikwidMetricCollectorConfiguration(Array<String> event_strings, bool report_events,
+                                              bool report_metrics, bool report_per_thread) {
+    data_ = make_object<LikwidMetricCollectorConfigurationNode>(event_strings, report_events,
+                                                                report_metrics, report_per_thread);
+  }
+
+  TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(LikwidMetricCollectorConfiguration, ObjectRef,
+                                        LikwidMetricCollectorConfigurationNode);
+};
+
+TVM_REGISTER_GLOBAL("runtime.profiling.LikwidMetricCollectorConfiguration")
+    .set_body_typed([](Array<String> event_string, bool report_events, bool report_metrics,
+                       bool report_per_thread) {
+      return LikwidMetricCollectorConfiguration(event_string, report_events, report_metrics,
+                                                report_per_thread);
+    });
+
+// -------------------------------------------------------------------------------------------------
+// Likwid Metric Collector Node
+// -------------------------------------------------------------------------------------------------
+
+/// @brief A metric collector implementation that uses the LIKWID API to read hardware counters.
 struct LikwidMetricCollectorNode final : public MetricCollectorNode {
-  /*! \brief Construct a new collector node object.
-   *
-   * \param collect_raw_events If this is true, collect raw event counts
-   * \param collect_derived_metrics If this is true, collect the derived metrics of the set event
-   * group instead of only the raw event counts.
-   * \param collect_thread_values If this is true, also collect the event counts of each known
-   * thread instead of only the total.
-   * \todo Add compatibility check!
-   */
-  explicit LikwidMetricCollectorNode(bool collect_raw_events, bool collect_derived_metrics,
-                                     bool collect_thread_values)
-      : _collect_raw_events(collect_raw_events),
-        _collect_derived_metrics(collect_derived_metrics),
-        _collect_thread_values(collect_thread_values) {}
+  /// @brief Construct a new LikwidMetricCollectorNode.
+  /// @param config The configuration to use for LIKWID setup and metric reporting.
+  explicit LikwidMetricCollectorNode(LikwidMetricCollectorConfiguration config)
+      : _config(config.as<LikwidMetricCollectorConfigurationNode>()) {}
 
-  /*! \brief Initialization call. Establish connection to likwid-perfctr API.
-   *
-   * \param devices Not used by this collector at the moment.
-   */
   void Init(Array<DeviceWrapper> devices) override {
-    // LOG(INFO) << "Initialize marker...";
-    likwid_markerInit();
-    // LOG(INFO) << "Initialize marker thread...";
-    // likwid_markerThreadInit();
-    //  Since currently we use a combination of the marker API for
-    //  initialization and perfmon calls for actual readings, we need to
-    //  open a marker region to prevent LIKWID printing warnings when the
-    //  process terminates. This should not be an issue once we replace the
-    //  marker API calls with manual perfmon initialization.
-    _marker_start_region();
-    _marker_stop_region();
+    // Check if the user provided devices not supported by this collector and warn accordingly.
+    if (devices.size() > 1 || devices[0]->device.device_type != kDLCPU) {
+      LOG(WARNING) << "This collector only collects events on the primary CPU TVM is running on; "
+                      "Other devices will be ignored.";
+    }
+
+    // Initialize LIKWID data structures.
+    topology_init();
+    affinity_init();
+
+    // Get CPU information and initialize perfmon facilities.
+    CpuTopology_t cpu_topology = get_cpuTopology();
+    _n_threads = cpu_topology->numHWThreads;
+    std::vector<int> cpus = std::vector<int>(_n_threads);
+    for (int cpu_id = 0; cpu_id < _n_threads; ++cpu_id) {
+      cpus[cpu_id] = cpu_topology->threadPool[cpu_id].apicId;
+    }
+    int init_status = perfmon_init(cpu_topology->numHWThreads, cpus.data());
+    if (init_status < 0) {
+      LOG(ERROR) << "Encountered an error while initializing perfmon module. Error code: "
+                 << std::to_string(-init_status);
+      WarnAndDisable();
+      return;
+    }
+
+    // Get pre-defined group names of current architecture to check against later.
+    char **group_names, **short_infos, **long_infos;
+    int n_groups = perfmon_getGroups(&group_names, &short_infos, &long_infos);
+    std::vector<std::string> group_strings(n_groups);
+    for (int group_idx = 0; group_idx < n_groups; ++group_idx) {
+      group_strings[group_idx] = group_names[group_idx];
+    }
+    perfmon_returnGroups(n_groups, group_names, short_infos, long_infos);
+
+    // Construct full event string from the provided sub-strings.
+    std::string event_set_string = "";
+    int n_event_strings = _config->event_strings.size();
+    for (int event_string_idx = 0; event_string_idx < n_event_strings; ++event_string_idx) {
+      std::string substring = _config->event_strings[event_string_idx];
+      if (substring.find(":") == std::string::npos) {
+        auto group_name_iter = std::find(group_strings.begin(), group_strings.end(), substring);
+        if (group_name_iter == std::end(group_strings)) {
+          LOG(WARNING) << "Group \'" << substring << "\' does not exist for this architecture. "
+                       << "Skipping it.";
+          continue;
+        }
+      }
+      event_set_string = event_set_string + substring;
+      if (event_string_idx < n_event_strings - 1) {
+        event_set_string = event_set_string + ",";
+      }
+    }
+
+    // Check if the final event string is valid, register perfmon event set, and get group info.
+    if (event_set_string.size() == 0) {
+      LOG(ERROR) << "Final event set string is empty.";
+      WarnAndDisable();
+      return;
+    }
+    _group_id = perfmon_addEventSet(event_set_string.data());
+    _n_events = perfmon_getNumberOfEvents(_group_id);
+    _n_metrics = perfmon_getNumberOfMetrics(_group_id);
+
+    // Setup and start counters.
+    int counter_status = perfmon_setupCounters(_group_id);
+    if (counter_status < 0) {
+      LOG(ERROR) << "Encountered an error during counter setup. Error code: "
+                 << std::to_string(-counter_status)
+                 << ((counter_status == -1) ? "(counters could not be set up)"
+                                            : "(invalid group id)");
+      WarnAndDisable();
+      return;
+    }
+    int counter_start_status = perfmon_startCounters();
+    if (counter_start_status < 0) {
+      LOG(ERROR) << "Encountered an error during counter startup on thread "
+                 << std::to_string(-counter_start_status - 1) << ".";
+      WarnAndDisable();
+    }
   }
 
-  /*! \brief Begin collecting counter data.
-   *
-   * \param device Not used by this collector at the moment.
-   * \returns A `LikwidEventSetNode` containing the values read at the start of the call. Used by
-   * the next `Stop` call to determine difference.
-   */
   ObjectRef Start(Device device) override {
-    if (device.device_type != kDLCPU) {
-      LOG(WARNING) << "For now, this collector only supports CPUs!";
+    // Can not read any metrics if group id was not initialized.
+    if (_group_id < 0) {
+      return ObjectRef(nullptr);
     }
-    auto start_values = _perfmon_read_and_get_results();
-    return ObjectRef(make_object<LikwidEventSetNode>(start_values, device));
+    return ObjectRef(make_object<LikwidCounterStateNode>(ReadCounterResults(), device));
   }
 
-  /*! \brief End data collection and report results.
-   *
-   * \param object The previously created `LikwidEventSetNode`.
-   * \returns A mapping from the names of the collected metrics to their corresponding values.
-   */
   Map<String, ObjectRef> Stop(ObjectRef object) override {
-    std::unordered_map<String, ObjectRef> reported_metrics;
-    const LikwidEventSetNode* event_set_node = object.as<LikwidEventSetNode>();
-    // Collect event counts
-    if (_collect_raw_events) {
-      const auto end_values = _perfmon_read_and_get_results();
-      for (const auto& name_result : end_values) {
-        std::string event_name = name_result.first;
-        std::vector<double> end_thread_values = name_result.second;
-        std::vector<double> start_thread_values = event_set_node->start_values.at(event_name);
-        double total = 0;
-        for (std::size_t thread_id{}; thread_id < end_thread_values.size(); ++thread_id) {
-          std::string name = event_name + " [Thread " + std::to_string(thread_id) + "]";
-          double diff = end_thread_values[thread_id] - start_thread_values[thread_id];
-          if (diff < 0) {
-            LOG(WARNING) << OVERFLOW_WARNING;
-            if (!_collect_thread_values) {
-              continue;
-            }
-            reported_metrics[name] = ObjectRef(make_object<CountNode>(-1));
-          } else if (isnan(diff)) {
-            LOG(WARNING) << NAN_WARNING;
-            // We need to prevent NaN values, else we will not be able to deserialize
-            // reports later
-            if (!_collect_thread_values) {
-              continue;
-            }
-            reported_metrics[name] = ObjectRef(make_object<CountNode>(-1));
-          } else {
-            total += diff;
-            if (!_collect_thread_values) {
-              continue;
-            }
-            reported_metrics[name] = ObjectRef(make_object<CountNode>(diff));
+    // Can not read any metrics if group id was not initialized.
+    if (_group_id < 0) {
+      return std::unordered_map<String, ObjectRef>();
+    }
+
+    // Read group counters and get initial results from object reference.
+    const auto current_counts = ReadCounterResults();
+    const auto& node = *object.as<LikwidCounterStateNode>();
+    const auto& initial_counts = node.data;
+
+    // Collect event counts if desired.
+    std::unordered_map<String, ObjectRef> count_nodes;
+    if (_config->report_events) {
+      for (const auto& iter : current_counts) {
+        const std::string& event_name = iter.first;
+        const std::vector<double>& initial_cnt = initial_counts.at(event_name);
+        const std::vector<double>& current_cnt = current_counts.at(event_name);
+        double cnt_total = 0;
+        for (int thread_id = 0; thread_id < _n_threads; ++thread_id) {
+          double cnt_difference = current_cnt.at(thread_id) - initial_cnt.at(thread_id);
+          if (_config->report_per_thread) {
+            std::string event_name_thread = event_name + "_" + std::to_string(thread_id);
+            count_nodes[event_name_thread] = ObjectRef(make_object<CountNode>(cnt_difference));
           }
+          cnt_total += cnt_difference;
         }
-        std::string name = event_name;
-        if (_collect_thread_values) {
-          name += " [Total]";
-        }
-        reported_metrics[name] = ObjectRef(make_object<CountNode>(total));
+        count_nodes[event_name] = ObjectRef(make_object<CountNode>(cnt_total));
       }
     }
-    // Collect metric results
-    if (_collect_derived_metrics) {
-      const auto metric_values = _perfmon_read_and_get_metrics();
-      for (const auto& name_result : metric_values) {
-        std::string metric_name = name_result.first;
-        std::vector<double> metric_values = name_result.second;
-        double total = 0;
-        for (std::size_t thread_id{}; thread_id < metric_values.size(); ++thread_id) {
-          std::string name = metric_name + " [Thread " + std::to_string(thread_id) + "]";
-          double count = metric_values[thread_id];
-          if (isnan(count)) {
-            LOG(WARNING) << NAN_WARNING;
-            // We need to filter out NaN values, else we will not be able to deserialize
-            // reports later
-            if (!_collect_thread_values) {
-              continue;
-            }
-            reported_metrics[name] = ObjectRef(make_object<RatioNode>(-1));
-          } else {
-            total += count;
-            if (!_collect_thread_values) {
-              continue;
-            }
-            reported_metrics[name] = ObjectRef(make_object<RatioNode>(count));
+
+    // Collect metrics if desired.
+    if (_config->report_metrics) {
+      for (int metric_id = 0; metric_id < _n_metrics; ++metric_id) {
+        std::string metric_name = perfmon_getMetricName(_group_id, metric_id);
+        double metric_total = 0;
+        for (int thread_id = 0; thread_id < _n_threads; ++thread_id) {
+          double metric_result = perfmon_getMetric(_group_id, metric_id, thread_id);
+          if (_config->report_per_thread) {
+            std::string metric_name_thread = metric_name + "_" + std::to_string(thread_id);
+            count_nodes[metric_name_thread] = ObjectRef(make_object<RatioNode>(metric_result));
           }
+          metric_total += metric_result;
         }
-        std::string name = metric_name;
-        if (_collect_thread_values) {
-          name += " [Total]";
-        }
-        reported_metrics[name] = ObjectRef(make_object<RatioNode>(total));
+        count_nodes[metric_name] = ObjectRef(make_object<RatioNode>(metric_total));
       }
     }
-    return reported_metrics;
+
+    return count_nodes;
   }
 
-  /*! \brief Close connection to likwid-perfctr API. */
-  ~LikwidMetricCollectorNode() final { likwid_markerClose(); }
+  ~LikwidMetricCollectorNode() final {
+    // Counters were only started if the group id was set.
+    if (_group_id >= 0) {
+      int counter_stop_status = perfmon_stopCounters();
+      if (counter_stop_status < 0) {
+        LOG(ERROR) << "Encountered an error while stopping counters of thread "
+                   << std::to_string(-counter_stop_status - 1) << ".";
+      }
+    }
+
+    // Finalize and cleanup LIKWID data structures.
+    perfmon_finalize();
+    topology_finalize();
+  }
 
  private:
-  bool _collect_raw_events;
-  bool _collect_derived_metrics;
-  bool _collect_thread_values;
+  void WarnAndDisable() {
+    LOG(WARNING) << "Metric collector could not be initialized. Disabling metric collection.";
+    _group_id = -1;
+  }
+
+  std::unordered_map<std::string, std::vector<double>> ReadCounterResults() const {
+    int read_status = perfmon_readGroupCounters(_group_id);
+    if (read_status < 0) {
+      LOG(ERROR) << "Encountered an error while reading group counters of thread "
+                 << std::to_string(-read_status - 1) << ".";
+      return std::unordered_map<std::string, std::vector<double>>();
+    }
+    std::unordered_map<std::string, std::vector<double>> counts;
+    for (int event_id = 0; event_id < _n_events; ++event_id) {
+      std::vector<double> thread_counts(_n_threads);
+      for (int thread_id = 0; thread_id < _n_threads; ++thread_id) {
+        thread_counts[thread_id] = perfmon_getResult(_group_id, event_id, thread_id);
+      }
+      std::string name = perfmon_getEventName(_group_id, event_id);
+      counts[name] = thread_counts;
+    }
+    return counts;
+  }
+
+ private:
+  const LikwidMetricCollectorConfigurationNode* _config = nullptr;
+  int _group_id;
+  int _n_threads;
+  int _n_events;
+  int _n_metrics;
 
  public:
   static constexpr const char* _type_key = "runtime.profiling.LikwidMetricCollector";
   TVM_DECLARE_FINAL_OBJECT_INFO(LikwidMetricCollectorNode, MetricCollectorNode);
 };
 
-/*! \brief Wrapper for `LikwidMetricCollectorNode`. */
+/// @brief Wrapper for a LikwidMetricCollectorNode.
 class LikwidMetricCollector : public MetricCollector {
  public:
-  explicit LikwidMetricCollector(bool collect_raw_events, bool collect_derived_metrics,
-                                 bool collect_thread_values) {
-    data_ = make_object<LikwidMetricCollectorNode>(collect_raw_events, collect_derived_metrics,
-                                                   collect_thread_values);
+  /// @brief Construct a new LikwidMetricCollector object.
+  /// @param config The configuration to use for LIKWID setup and metric reporting.
+  explicit LikwidMetricCollector(LikwidMetricCollectorConfiguration config) {
+    data_ = make_object<LikwidMetricCollectorNode>(config);
   }
+
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(LikwidMetricCollector, MetricCollector,
                                         LikwidMetricCollectorNode);
 };
 
-/*! \brief Construct a metric collector that uses the likwid-perfctr API to collect hardware counter
- * data.
- *
- * \note Please make sure to run TVM through the likwid-perfctr wrapper application following the
- * instructions given in the Likwid documentation!
- *
- * \param collect_raw_events If this is true, collect raw event counts
- * \param collect_derived_metrics If this is true, collect the derived metrics of the set event
- * group instead of only the raw event counts.
- * \param collect_thread_values If this is true, also collect the event counts of each known thread
- * instead of only the total.
- */
-MetricCollector CreateLikwidMetricCollector(bool collect_raw_events,
-                                            bool collect_derived_metrics = false,
-                                            bool collect_thread_values = false) {
-  return LikwidMetricCollector(collect_raw_events, collect_derived_metrics, collect_thread_values);
-}
-
-TVM_REGISTER_OBJECT_TYPE(LikwidEventSetNode);
 TVM_REGISTER_OBJECT_TYPE(LikwidMetricCollectorNode);
 
 TVM_REGISTER_GLOBAL("runtime.profiling.LikwidMetricCollector")
-    .set_body_typed([](bool collect_raw_events, bool collect_derived_metrics,
-                       bool collect_thread_values) {
-      return LikwidMetricCollector(collect_raw_events, collect_derived_metrics,
-                                   collect_thread_values);
+    .set_body_typed([](LikwidMetricCollectorConfiguration config) {
+      return LikwidMetricCollector(config);
     });
-
-TVM_REGISTER_GLOBAL("runtime.rpc_likwid_profile_func").set_body_typed(rpc_likwid_profile_func);
 
 // -------------------------------------------------------------------------------------------------
 // RPC Profiling
 // -------------------------------------------------------------------------------------------------
 
-/*! \brief Execute a profiling run of the given function using the provided vm.
- *
- * \param vm_mod The `Module` containing the profiler vm to profile on.
- * \param func_name The name of the function to profile.
- * \param collect_raw_events If this is true, collect raw event counts
- * \param collect_derived_metrics If this is true, collect the derived metrics of the set event
- * group instead of only the raw event counts.
- * \param collect_thread_values If this is true, also collect the event counts of each known thread
- * instead of only the total.
- * \returns The serialized `Report` of the profiling run.
- */
-std::string rpc_likwid_profile_func(Module vm_mod, std::string func_name, bool collect_raw_events,
-                                    bool collect_derived_metrics, bool collect_thread_values) {
+/// @brief Create a new metric collector that uses the LIKWID API for reading hardware counters.
+/// @param config The configuration to use for LIKWID setup and metric reporting.
+/// @return
+MetricCollector CreateLikwidMetricCollector(LikwidMetricCollectorConfiguration config) {
+  return LikwidMetricCollector(config);
+}
+
+/// @brief Profile a given VM module function remotely using performance counters read through the
+/// LIKWID API. A new metric collector is constructed on the remote and reports are sent back after
+/// the profiling run is completed.
+/// @param vm_mod The remote VM module.
+/// @param func_name The name of the function to profile.
+/// @param config The configuration to use for creating the remote LIKWID metric collector.
+/// @return
+std::string rpc_likwid_profile_func(Module vm_mod, String func_name,
+                                    LikwidMetricCollectorConfiguration config) {
   LOG(INFO) << "Received profiling request for function " << func_name;
   auto profile_func = vm_mod.GetFunction("profile");
-  Array<MetricCollector> collectors({CreateLikwidMetricCollector(
-      collect_raw_events, collect_derived_metrics, collect_thread_values)});
+  Array<MetricCollector> collectors({CreateLikwidMetricCollector(config)});
   LOG(INFO) << "Begin profiling...";
   Report report = profile_func(func_name, collectors);
-  LOG(INFO) << "Done. Sending serialized report.";
+  LOG(INFO) << "Done. Sending back serialized report.";
   return std::string(report->AsJSON().c_str());
 }
+
+TVM_REGISTER_GLOBAL("runtime.rpc_likwid_profile_func").set_body_typed(rpc_likwid_profile_func);
 
 }  // namespace likwid
 }  // namespace profiling

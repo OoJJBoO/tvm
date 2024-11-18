@@ -10,12 +10,12 @@ namespace runtime {
 namespace profiling {
 namespace likwid {
 
-TVM_DLL MetricCollector CreateLikwidMetricCollector(bool collect_raw_events,
-                                                    bool collect_derived_metrics,
-                                                    bool collect_thread_values);
+struct LikwidMetricCollectorConfiguration;
 
-std::string rpc_likwid_profile_func(Module vm_mod, std::string func_name, bool collect_raw_events,
-                                    bool collect_derived_metrics, bool collect_thread_values);
+TVM_DLL MetricCollector CreateLikwidMetricCollector(LikwidMetricCollectorConfiguration config);
+
+std::string rpc_likwid_profile_func(Module vm_mod, String func_name,
+                                    LikwidMetricCollectorConfiguration config);
 
 }  // namespace likwid
 }  // namespace profiling
