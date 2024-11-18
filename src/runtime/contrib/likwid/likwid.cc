@@ -10,6 +10,8 @@ namespace runtime {
 namespace profiling {
 namespace likwid {
 
+// TODO: Add pinning functionality!
+
 // -------------------------------------------------------------------------------------------------
 // Event Set Node
 // -------------------------------------------------------------------------------------------------
@@ -167,8 +169,8 @@ struct LikwidMetricCollectorNode final : public MetricCollectorNode {
     if (counter_status < 0) {
       LOG(ERROR) << "Encountered an error during counter setup. Error code: "
                  << std::to_string(-counter_status)
-                 << ((counter_status == -1) ? "(counters could not be set up)"
-                                            : "(invalid group id)");
+                 << ((counter_status == -1) ? " (counters could not be set up)"
+                                            : " (invalid group id)");
       WarnAndDisable();
       return;
     }
