@@ -544,6 +544,68 @@ def test_gather():
     _verify_gather([3, 3], [[0, 2]], [3, 1, 2], 1)
 
 
+@pytest.mark.parametrize(
+    "data_shape, indices_shape, axis",
+    [
+        ([3, 4, 5], [1, 4, 5], 0),
+        ([3, 4, 5], [3, 2, 5], 1),
+        ([3, 4, 5], [3, 4, 2], 2),
+    ],
+)
+def test_gather_elements(data_shape, indices_shape, axis):
+    gather_elements_node = helper.make_node("GatherElements", ["data", "indices"], ["y"], axis=axis)
+
+    graph = helper.make_graph(
+        [gather_elements_node],
+        "gather_elements_test",
+        inputs=[
+            helper.make_tensor_value_info("data", TensorProto.FLOAT, data_shape),
+            helper.make_tensor_value_info("indices", TensorProto.INT64, indices_shape),
+        ],
+        outputs=[helper.make_tensor_value_info("y", TensorProto.FLOAT, indices_shape)],
+    )
+
+    model = helper.make_model(graph, producer_name="gather_elements_test")
+    input_values = {
+        "data": np.random.randn(*data_shape).astype("float32"),
+        "indices": np.random.randint(0, data_shape[axis], indices_shape).astype("int64"),
+    }
+    check_correctness(model, inputs=input_values)
+
+
+@pytest.mark.parametrize(
+    "data_shape, indices_shape, batch_dims",
+    [
+        ([2, 2], [2, 2], 0),
+        ([2, 2], [2, 1], 0),
+        ([2, 2, 2], [1], 0),
+        ([2, 2, 2], [2, 2], 0),
+        ([2, 2, 2], [2, 1, 2], 0),
+        ([2, 2, 2], [2, 2], 1),
+        ([2, 2, 2], [2, 1], 1),
+    ],
+)
+def test_gather_nd(data_shape, indices_shape, batch_dims):
+    gather_nd_node = helper.make_node("GatherND", ["data", "indices"], ["y"], batch_dims=batch_dims)
+
+    graph = helper.make_graph(
+        [gather_nd_node],
+        "gather_nd_test",
+        inputs=[
+            helper.make_tensor_value_info("data", TensorProto.FLOAT, data_shape),
+            helper.make_tensor_value_info("indices", TensorProto.INT64, indices_shape),
+        ],
+        outputs=[helper.make_tensor_value_info("y", TensorProto.FLOAT, None)],
+    )
+
+    model = helper.make_model(graph, producer_name="gather_nd_test")
+    input_values = {
+        "data": np.random.randn(*data_shape).astype("float32"),
+        "indices": np.random.randint(0, 2, indices_shape).astype("int64"),
+    }
+    check_correctness(model, inputs=input_values)
+
+
 @pytest.mark.parametrize("axis", [0, 1, 2])
 @pytest.mark.parametrize(("name", "opset"), [("Scatter", 10), ("ScatterElements", 11)])
 def test_scatter(axis: int, name: str, opset: int):
@@ -599,6 +661,34 @@ def test_scatter_nd(reduction):
     verify_scatter_nd([4, 4, 4], [2, 1], [2, 4, 4])
     verify_scatter_nd([4, 5, 6], [2, 3, 2], [2, 3, 6])
     verify_scatter_nd([10], [5, 1], [5])
+
+
+@pytest.mark.parametrize("tensor_shape", [[32, 32]])
+@pytest.mark.parametrize("condition_shape", [None, [8], [16]])
+@pytest.mark.parametrize("axis", [None, 0, 1])
+def test_compress(
+    tensor_shape: List[int],
+    condition_shape: Optional[List[int]],
+    axis: Optional[int],
+):
+    if condition_shape is None and axis is None:
+        pytest.skip("Either condition_shape or axis must be specified")
+    if condition_shape is None:
+        condition_shape = [tensor_shape[axis]]
+    compress_node = helper.make_node("Compress", ["tensor", "condition"], ["output"], axis=axis)
+    graph = helper.make_graph(
+        [compress_node],
+        "compress_test",
+        inputs=[
+            helper.make_tensor_value_info("tensor", TensorProto.FLOAT, tensor_shape),
+            helper.make_tensor_value_info("condition", TensorProto.BOOL, condition_shape),
+        ],
+        outputs=[
+            helper.make_tensor_value_info("output", TensorProto.FLOAT, [])
+        ],  # shape is unknown
+    )
+    model = helper.make_model(graph, producer_name="compress_test")
+    check_correctness(model, opset=11)
 
 
 def test_size():
@@ -890,23 +980,57 @@ def test_shrink():
 @pytest.mark.parametrize("dilation", [1, 2])
 @pytest.mark.parametrize("bias", [True, False])
 @pytest.mark.parametrize("pad", [0, 2])
-def test_conv(stride: int, dilation: int, pad: int, bias: bool):
+@pytest.mark.parametrize("auto_pad", ["SAME_UPPER", "SAME_LOWER", "VALID"])
+def test_conv(stride: int, dilation: int, pad: int, bias: bool, auto_pad: str):
     def _verify_conv(input_shape, weight_shape):
         nd = len(weight_shape) - 2
-        output_shape = [input_shape[0], weight_shape[0]] + [
-            (input_shape[i] + 2 * pad - dilation * (weight_shape[i] - 1) - 1) // stride + 1
-            for i in range(2, len(input_shape))
-        ]
-        bias_shape = [output_shape[1]]
-        conv_node = helper.make_node(
-            "Conv",
-            inputs=["x", "w"] + (["b"] if bias else []),
-            outputs=["y"],
-            strides=[stride] * nd,
-            dilations=[dilation] * nd,
-            pads=[pad] * nd * 2,
-            group=input_shape[1] // weight_shape[1],
-        )
+        if auto_pad == "VALID":
+            output_shape = [input_shape[0], weight_shape[0]] + [
+                (input_shape[i] - dilation * (weight_shape[i] - 1) - 1) // stride + 1
+                for i in range(2, len(input_shape))
+            ]
+            bias_shape = [output_shape[1]]
+            conv_node = helper.make_node(
+                "Conv",
+                inputs=["x", "w"] + (["b"] if bias else []),
+                outputs=["y"],
+                strides=[stride] * nd,
+                dilations=[dilation] * nd,
+                auto_pad=auto_pad,
+                group=input_shape[1] // weight_shape[1],
+            )
+        elif auto_pad in ("SAME_UPPER", "SAME_LOWER"):
+            if dilation == 2:
+                # auto_pad = "SAME" and dilation = 2 is not supported in ONNX
+                return
+            output_shape = [input_shape[0], weight_shape[0]] + [
+                (input_shape[i] + stride - 1) // stride for i in range(2, len(input_shape))
+            ]
+            bias_shape = [output_shape[1]]
+            conv_node = helper.make_node(
+                "Conv",
+                inputs=["x", "w"] + (["b"] if bias else []),
+                outputs=["y"],
+                strides=[stride] * nd,
+                dilations=[dilation] * nd,
+                auto_pad=auto_pad,
+                group=input_shape[1] // weight_shape[1],
+            )
+        else:
+            output_shape = [input_shape[0], weight_shape[0]] + [
+                (input_shape[i] + 2 * pad - dilation * (weight_shape[i] - 1) - 1) // stride + 1
+                for i in range(2, len(input_shape))
+            ]
+            bias_shape = [output_shape[1]]
+            conv_node = helper.make_node(
+                "Conv",
+                inputs=["x", "w"] + (["b"] if bias else []),
+                outputs=["y"],
+                strides=[stride] * nd,
+                dilations=[dilation] * nd,
+                pads=[pad] * nd * 2,
+                group=input_shape[1] // weight_shape[1],
+            )
         graph = helper.make_graph(
             [conv_node],
             "conv_test",
@@ -2182,194 +2306,57 @@ def test_batch_norm():
     check_correctness(model, opset=15)
 
 
-def test_maxpool_and_averagepool():
-    for pool_name in ["MaxPool", "AveragePool"]:
+@pytest.mark.parametrize("pool_name", ["MaxPool", "AveragePool", "LpPool"])
+@pytest.mark.parametrize(
+    "shape, auto_pad, kernel_shape, strides, pads",
+    [
         # Pool1D
-        verify_unary(
-            pool_name,
-            [1, 1, 32],
-            dict(
-                auto_pad="NOTSET",
-                kernel_shape=[3],
-                pads=[1, 1],
-                strides=[1],
-            ),
-        )
+        ([1, 1, 32], "NOTSET", [3], [1], [1, 1]),
         # Pool1D with stride
-        verify_unary(
-            pool_name,
-            [1, 1, 32],
-            dict(
-                auto_pad="NOTSET",
-                kernel_shape=[3],
-                pads=[1, 2],
-                strides=[2],
-            ),
-        )
+        ([1, 1, 32], "NOTSET", [3], [2], [1, 1]),
         # Pool1D with stride and autopadding
-        verify_unary(
-            pool_name,
-            [1, 1, 32],
-            dict(
-                auto_pad="SAME_UPPER",
-                kernel_shape=[7],
-                pads=None,
-                strides=[2],
-            ),
-        )
-        verify_unary(
-            pool_name,
-            [1, 1, 32],
-            dict(
-                auto_pad="SAME_LOWER",
-                kernel_shape=[4],
-                pads=None,
-                strides=[4],
-            ),
-        )
-        verify_unary(
-            pool_name,
-            [1, 1, 32],
-            dict(
-                auto_pad="VALID",
-                kernel_shape=[5],
-                pads=None,
-                strides=[5],
-            ),
-        )
-        verify_unary(
-            pool_name,
-            [1, 1, 32],
-            dict(
-                auto_pad="SAME_UPPER",
-                kernel_shape=[3],
-                pads=None,
-            ),
-        )
+        ([1, 1, 32], "SAME_UPPER", [7], [2], None),
+        ([1, 1, 32], "SAME_LOWER", [4], [4], None),
+        ([1, 1, 32], "VALID", [5], [5], None),
+        ([1, 1, 32], "SAME_UPPER", [3], [1], None),
         # Pool2D
-        verify_unary(
-            pool_name,
-            [1, 1, 32, 32],
-            dict(
-                auto_pad="NOTSET",
-                kernel_shape=[3, 3],
-                pads=[1, 1, 1, 1],
-                strides=[1, 1],
-            ),
-        )
+        ([1, 1, 32, 32], "NOTSET", [3, 3], [1, 1], [1, 1, 1, 1]),
         # Pool2D with stride
-        verify_unary(
-            pool_name,
-            [1, 1, 32, 32],
-            dict(
-                auto_pad="NOTSET",
-                kernel_shape=[3, 3],
-                pads=[1, 1, 1, 1],
-                strides=[2, 2],
-            ),
-        )
+        ([1, 1, 32, 32], "NOTSET", [3, 3], [2, 2], [1, 1, 1, 1]),
         # Pool2D with stride and autopadding
-        verify_unary(
-            pool_name,
-            [1, 1, 32, 32],
-            dict(
-                auto_pad="SAME_UPPER",
-                kernel_shape=[3, 7],
-                pads=None,
-                strides=[3, 2],
-            ),
-        )
-        verify_unary(
-            pool_name,
-            [1, 1, 32, 32],
-            dict(
-                auto_pad="SAME_LOWER",
-                kernel_shape=[3, 3],
-                pads=None,
-                strides=[2, 2],
-            ),
-        )
-        verify_unary(
-            pool_name,
-            [1, 1, 32, 32],
-            dict(
-                auto_pad="VALID",
-                kernel_shape=[3, 3],
-                pads=None,
-                strides=[2, 2],
-            ),
-        )
-        verify_unary(
-            pool_name,
-            [1, 1, 32, 32],
-            dict(
-                auto_pad="SAME_UPPER",
-                kernel_shape=[3, 3],
-                pads=None,
-            ),
-        )
+        ([1, 1, 32, 32], "SAME_UPPER", [3, 7], [3, 2], None),
+        ([1, 1, 32, 32], "SAME_LOWER", [3, 3], [2, 2], None),
+        ([1, 1, 32, 32], "VALID", [3, 3], [2, 2], None),
+        ([1, 1, 32, 32], "SAME_UPPER", [3, 3], [1, 1], None),
         # Pool3D
-        verify_unary(
-            pool_name,
-            [1, 1, 32, 32, 32],
-            dict(
-                auto_pad="NOTSET",
-                kernel_shape=[3, 3, 4],
-                pads=[1, 2, 1, 1, 2, 2],
-                strides=[1, 1, 1],
-            ),
-        )
+        ([1, 1, 32, 32, 32], "NOTSET", [3, 3, 4], [1, 1, 1], [1, 2, 1, 1, 2, 2]),
         # Pool3D with stride
-        verify_unary(
-            pool_name,
-            [1, 1, 32, 32, 32],
-            dict(
-                auto_pad="NOTSET",
-                kernel_shape=[3, 4, 3],
-                pads=[1, 1, 1, 1, 1, 2],
-                strides=[2, 2, 3],
-            ),
-        )
+        ([1, 1, 32, 32, 32], "NOTSET", [3, 4, 3], [2, 2, 3], [1, 1, 1, 1, 1, 2]),
         # Pool3D with stride and autopadding
-        verify_unary(
-            pool_name,
-            [1, 1, 32, 32, 32],
-            dict(
-                auto_pad="SAME_UPPER",
-                kernel_shape=[4, 3, 3],
-                pads=None,
-                strides=[3, 2, 2],
-            ),
-        )
-        verify_unary(
-            pool_name,
-            [1, 1, 32, 32, 32],
-            dict(
-                auto_pad="SAME_LOWER",
-                kernel_shape=[3, 3, 4],
-                pads=None,
-                strides=[2, 2, 2],
-            ),
-        )
-        verify_unary(
-            pool_name,
-            [1, 1, 32, 32, 32],
-            dict(
-                auto_pad="VALID",
-                kernel_shape=[3, 3, 5],
-                pads=None,
-                strides=[2, 2, 3],
-            ),
-        )
-        verify_unary(
-            pool_name,
-            [1, 1, 32, 32, 32],
-            dict(
-                auto_pad="SAME_UPPER",
-                kernel_shape=[3, 3, 5],
-                pads=None,
-            ),
-        )
+        ([1, 1, 32, 32, 32], "SAME_UPPER", [4, 3, 3], [3, 2, 2], None),
+        ([1, 1, 32, 32, 32], "SAME_LOWER", [3, 3, 4], [2, 2, 2], None),
+        ([1, 1, 32, 32, 32], "VALID", [3, 3, 5], [2, 2, 3], None),
+        ([1, 1, 32, 32, 32], "SAME_UPPER", [3, 3, 5], [1, 1, 1], None),
+    ],
+)
+def test_pool(
+    pool_name: str,
+    shape: List[int],
+    auto_pad: str,
+    kernel_shape: List[int],
+    strides: List[int],
+    pads: List[int],
+):
+    verify_unary(
+        pool_name,
+        shape,
+        attrs={
+            "kernel_shape": kernel_shape,
+            "strides": strides,
+            "pads": pads,
+            "auto_pad": auto_pad,
+        },
+    )
 
 
 def test_global_average_pool():
@@ -2478,7 +2465,7 @@ def test_unique(axis: Optional[int], sorted: int):
     check_correctness(model)
 
 
-@pytest.mark.parametrize("shape", [(), (1,), (2, 3), (4, 5, 6)])
+@pytest.mark.parametrize("shape", [(), (1,), (2, 3), (4, 5, 6), (7, 8, 9, 10)])
 def test_nonzero(shape):
     verify_unary("NonZero", shape, input_dtype=TensorProto.BOOL, output_dtype=TensorProto.INT64)
 

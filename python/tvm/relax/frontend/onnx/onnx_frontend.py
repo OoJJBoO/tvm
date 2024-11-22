@@ -49,6 +49,8 @@ from tvm.ir import IRModule
 from tvm.ir.supply import NameSupply
 from tvm.tir.generic import cast
 
+from ..common import autopad
+
 
 def get_type(elem_type: Union[str, int]) -> str:
     """Converts onnx integer datatype to numpy datatype"""
@@ -781,6 +783,24 @@ class Gather(OnnxOpConverter):
         return relax.op.take(data, indices, axis)
 
 
+class GatherElements(OnnxOpConverter):
+    """Convert an onnx GatherElements node into an equivalent Relax expression."""
+
+    @classmethod
+    def _impl_v13(cls, bb, inputs, attr, params):
+        axis = attr.get("axis", 0)
+        return relax.op.gather_elements(inputs[0], inputs[1], axis)
+
+
+class GatherND(OnnxOpConverter):
+    """Convert an onnx GatherND node into an equivalent Relax expression."""
+
+    @classmethod
+    def _impl_v13(cls, bb, inputs, attr, params):
+        batch_dims = attr.get("batch_dims", 0)
+        return relax.op.gather_nd(inputs[0], inputs[1], batch_dims)
+
+
 class Scatter(OnnxOpConverter):
     """Convert an onnx Scatter node into an equivalent Relax expression."""
 
@@ -831,6 +851,32 @@ class ScatterND(OnnxOpConverter):
     def _impl_v18(cls, bb, inputs, attr, params):
         reduction = cls._reduction_check(attr, ["update", "add", "mul", "min", "max"])
         return relax.op.scatter_nd(inputs[0], inputs[1], inputs[2], reduction)
+
+
+class Compress(OnnxOpConverter):
+    """Convert an onnx Compress node into an equivalent Relax expression."""
+
+    @classmethod
+    def _impl_v11(cls, bb, inputs, attr, params):
+        tensor, condition = inputs
+        axis = attr.get("axis", None)
+
+        # Change one hot tensor to indices e.g. [0, 1, 1, 0, 1] -> [1, 2, 4]
+        if condition.struct_info.dtype != "bool":
+            raise ValueError("Condition tensor is expected to be a boolean tensor")
+        if condition.struct_info.ndim != 1:
+            raise ValueError("Condition tensor is expected to be a 1D boolean tensor")
+        indices = relax.op.nonzero(condition)
+        num_nonzero = tir.Var("num_nonzero", "int64")
+        indices = bb.match_cast(indices, relax.TensorStructInfo([1, num_nonzero], "int64"))
+        indices = relax.op.reshape(indices, [-1])
+
+        if axis is not None:
+            return relax.op.take(tensor, indices, axis=axis)
+
+        # if axis is None, flatten input tensor before selection
+        tensor = relax.op.reshape(tensor, (-1,))
+        return relax.op.take(tensor, indices, axis=0)
 
 
 class Size(OnnxOpConverter):
@@ -1164,10 +1210,14 @@ class Conv(OnnxOpConverter):
 
     @classmethod
     def _impl_v11(cls, bb, inputs, attr, params):
+        data = inputs[0]
         if hasattr(inputs[0].struct_info, "ndim"):
             ndim = inputs[0].struct_info.ndim
         else:
             ndim = len(inputs[0].struct_info.shape)
+
+        if "kernel_shape" not in attr:
+            attr["kernel_shape"] = inputs[1].struct_info.shape.values[2:]
 
         if ndim == 3:
             op = relax.op.nn.conv1d
@@ -1184,9 +1234,33 @@ class Conv(OnnxOpConverter):
         else:
             raise NotImplementedError("Ndim > 5 not supported for convolution.")
 
+        if "auto_pad" in attr:
+            attr["auto_pad"] = attr["auto_pad"].decode("utf-8")
+            if attr["auto_pad"] in ("SAME_UPPER", "SAME_LOWER"):
+                data = autopad(
+                    bb,
+                    inputs[0],
+                    attr.get("strides", [1] * (ndim - 2)),
+                    attr["kernel_shape"],
+                    attr.get("dilations", [1] * (ndim - 2)),
+                    mode=attr["auto_pad"],
+                    deconv=False,
+                )
+            elif attr["auto_pad"] == "VALID":
+                attr["pads"] = [0 for _ in range(ndim - 2)]
+            elif attr["auto_pad"] == "NOTSET":
+                pass
+            else:
+                msg = (
+                    f'Value {attr["auto_pad"]} in attribute "auto_pad" of operator Conv '
+                    f"is invalid."
+                )
+                raise tvm.error.OpAttributeInvalid(msg)
+            attr.pop("auto_pad")
+
         conv_out = bb.normalize(
             op(
-                data=inputs[0],
+                data=data,
                 weight=inputs[1],
                 strides=attr.get("strides", 1),
                 padding=attr.get("pads", 0),
@@ -2210,6 +2284,7 @@ class Pool(OnnxOpConverter):
         kernel_shape = attr.get("kernel_shape")
         pads = attr.get("pads", 0)
         strides = attr.get("strides", [1] * (ndim - 2))
+        count_include_pad = attr.get("count_include_pad", False)
 
         assert len(kernel_shape) in [1, 2, 3], "Currently only 1D/2D/3D/ pooling is supported."
 
@@ -2254,7 +2329,7 @@ class Pool(OnnxOpConverter):
             pads = tuple([val for pair in zip(*pads) for val in pair])
 
         op = getattr(relax.op.nn, cls.name + str(len(kernel_shape)) + "d")
-        return op(data, kernel_shape, strides, pads, dilations, ceil_mode)
+        return op(data, kernel_shape, strides, pads, dilations, ceil_mode, count_include_pad)
 
     @classmethod
     def _get_input_spatial_shape(cls, tensor):
@@ -2272,6 +2347,23 @@ class AveragePool(Pool):
     """Converts an onnx MaxPool node into an equivalent Relax expression."""
 
     name = "avg_pool"
+
+
+class LpPool(OnnxOpConverter):
+    """Converts an onnx LpPool node into an equivalent Relax expression."""
+
+    @classmethod
+    def _impl_v1(cls, bb, inputs, attr, params):
+        dtype = inputs[0].struct_info.dtype
+        p = attr.get("p", 2.0)
+        reci_p = relax.const(1.0 / p, dtype=dtype)
+        # emit for get struct_info
+        data = bb.emit(relax.op.power(inputs[0], relax.const(p, dtype=dtype)))
+        attr.update({"count_include_pad": True})
+        avg_pool = AveragePool._impl_v1(bb, [data], attr, params)
+        kernels = attr["kernel_shape"]
+        out = avg_pool * relax.const(_np.prod(kernels).astype(dtype))
+        return relax.op.power(out, reci_p)
 
 
 class GlobalAveragePool(OnnxOpConverter):
@@ -2726,7 +2818,22 @@ class Unique(OnnxOpConverter):
         axis = attr.get("axis", None)
         sorted = bool(attr.get("sorted", 1))
         # TODO(tvm-team): Add support for return_index, return_inverse, return_counts
-        return relax.op.unique(data, sorted=sorted, axis=axis)
+        unique = relax.op.unique(data, sorted=sorted, axis=axis)
+        unique_numbers = tir.Var("unique_numbers", "int64")
+        input_shape = data.struct_info.shape
+        dtype = data.struct_info.dtype
+
+        if axis is None:
+            # flatten the input tensor
+            return bb.match_cast(unique, relax.TensorStructInfo((unique_numbers,), dtype))
+
+        axis = axis if axis >= 0 else len(input_shape) + axis
+        if axis < 0 or axis >= len(input_shape):
+            raise ValueError(f"Axis {axis} is out of bounds")
+        output_shape = [
+            input_shape[i] if i != axis else unique_numbers for i in range(len(input_shape))
+        ]
+        return bb.match_cast(unique, relax.TensorStructInfo(output_shape, dtype))
 
 
 class NonZero(OnnxOpConverter):
@@ -2734,7 +2841,12 @@ class NonZero(OnnxOpConverter):
 
     @classmethod
     def _impl_v9(cls, bb, inputs, attr, params):
-        return relax.op.nonzero(inputs[0])
+        ndim = inputs[0].struct_info.ndim
+        ndim = 1 if ndim == 0 else ndim
+        nonzero_numbers = tir.Var("nonzero_numbers", "int64")
+        return bb.match_cast(
+            relax.op.nonzero(inputs[0]), relax.TensorStructInfo((ndim, nonzero_numbers), "int64")
+        )
 
 
 class HardSigmoid(OnnxOpConverter):
@@ -3070,12 +3182,12 @@ def _get_convert_map():
         "Squeeze": Squeeze,
         "Constant": Constant,
         "Gather": Gather,
-        # "GatherElements": GatherElements,
-        # "GatherND": GatherND,
+        "GatherElements": GatherElements,
+        "GatherND": GatherND,
         "Scatter": Scatter,
         "ScatterElements": ScatterElements,
         "ScatterND": ScatterND,
-        # "Compress": Compress,
+        "Compress": Compress,
         "Size": Size,
         "EyeLike": EyeLike,
         # Normalization
@@ -3108,7 +3220,7 @@ def _get_convert_map():
         "Tile": Tile,
         "AveragePool": AveragePool,
         "MaxPool": MaxPool,
-        # "LpPool": LpPool,
+        "LpPool": LpPool,
         "GlobalAveragePool": GlobalAveragePool,
         "GlobalMaxPool": GlobalMaxPool,
         "GlobalLpPool": GlobalLpPool,
